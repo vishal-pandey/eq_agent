@@ -1,0 +1,10 @@
+services:
+  eq-helper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - eq_helper/.env
+    restart: unless-stopped

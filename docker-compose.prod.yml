@@ -1,0 +1,8 @@
+services:
+  eq-helper:
+    image: ghcr.io/vishal-pandey/eq_agent:${IMAGE_TAG:-latest}
+    ports:
+      - "8000:8000"
+    env_file:
+      - eq_helper/.env
+    restart: unless-stopped

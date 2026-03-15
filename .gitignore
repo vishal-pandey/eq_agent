@@ -1,0 +1,6 @@
+.venv/
+.adk/
+__pycache__/
+*.pyc
+.DS_Store
+eq_helper/.env
