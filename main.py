@@ -23,9 +23,14 @@ APP_NAME = "eq_helper"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if DATABASE_URL:
+    # Ensure the URL uses the asyncpg driver so SQLAlchemy picks the right dialect
+    _db_url = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if "postgresql+asyncpg+asyncpg" in _db_url:
+        _db_url = DATABASE_URL  # was already correct, undo double-replace
+
     from google.adk.sessions import DatabaseSessionService
     print("🗄️  Using DatabaseSessionService (PostgreSQL)")
-    session_service = DatabaseSessionService(db_url=DATABASE_URL)
+    session_service = DatabaseSessionService(db_url=_db_url)
 else:
     from google.adk.sessions import InMemorySessionService
     print("⚠️  Using InMemorySessionService (sessions lost on restart)")
