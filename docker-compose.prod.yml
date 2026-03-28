@@ -8,6 +8,7 @@ services:
     environment:
       - TEMPORAL_HOST=${TEMPORAL_HOST:-localhost:7233}
       - N8N_FOLLOWUP_WEBHOOK_URL=${N8N_FOLLOWUP_WEBHOOK_URL:-}
+      - DATABASE_URL=${DATABASE_URL:-}
     restart: unless-stopped
 
   temporal-worker:

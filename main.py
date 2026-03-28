@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from google.adk.events.event import Event
 from google.adk.runners import Runner
-from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.adk.utils.context_utils import Aclosing
 from google.genai import types
 from pydantic import BaseModel
@@ -18,7 +17,20 @@ from eq_helper.agent import root_agent  # noqa: E402 — must load after env
 
 APP_NAME = "eq_helper"
 
-session_service = InMemorySessionService()
+# ---------------------------------------------------------------------------
+# Session storage: PostgreSQL if DATABASE_URL is set, else in-memory
+# ---------------------------------------------------------------------------
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if DATABASE_URL:
+    from google.adk.sessions import DatabaseSessionService
+    print("🗄️  Using DatabaseSessionService (PostgreSQL)")
+    session_service = DatabaseSessionService(db_url=DATABASE_URL)
+else:
+    from google.adk.sessions import InMemorySessionService
+    print("⚠️  Using InMemorySessionService (sessions lost on restart)")
+    session_service = InMemorySessionService()
+
 runner = Runner(
     app_name=APP_NAME,
     agent=root_agent,
