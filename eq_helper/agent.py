@@ -299,7 +299,6 @@ def _load_config_from_db() -> tuple[str, str]:
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
         return DEFAULT_DESCRIPTION, DEFAULT_INSTRUCTION
-    # asyncpg needs plain postgresql:// URL
     if "+asyncpg" in db_url:
         db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
 
@@ -320,7 +319,7 @@ def _load_config_from_db() -> tuple[str, str]:
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            result = None  # Can't run sync in running loop at import time
+            result = None
         else:
             result = loop.run_until_complete(_fetch())
     except RuntimeError:
@@ -333,12 +332,54 @@ def _load_config_from_db() -> tuple[str, str]:
     return DEFAULT_DESCRIPTION, DEFAULT_INSTRUCTION
 
 
+# ---------------------------------------------------------------------------
+# Dynamic instruction provider — reloads from DB every 60s
+# ---------------------------------------------------------------------------
+import time as _time
+import asyncpg as _apg_mod
+
+_config_cache: dict = {"instruction": DEFAULT_INSTRUCTION, "description": DEFAULT_DESCRIPTION, "ts": 0}
+_CACHE_TTL = 60  # seconds
+
+
+async def _refresh_config_cache():
+    """Fetch active config from DB and update cache."""
+    db_url = os.environ.get("DATABASE_URL", "")
+    if not db_url:
+        return
+    if "+asyncpg" in db_url:
+        db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+    try:
+        conn = await _apg_mod.connect(db_url)
+        row = await conn.fetchrow(
+            "SELECT description, instruction FROM agent_config "
+            "WHERE is_active = true ORDER BY version DESC LIMIT 1"
+        )
+        await conn.close()
+        if row:
+            _config_cache["instruction"] = row["instruction"]
+            _config_cache["description"] = row["description"]
+    except Exception:
+        pass  # keep stale cache on failure
+    _config_cache["ts"] = _time.time()
+
+
+async def _dynamic_instruction(ctx) -> str:
+    """ADK InstructionProvider — returns latest instruction from DB."""
+    if _time.time() - _config_cache["ts"] > _CACHE_TTL:
+        await _refresh_config_cache()
+    return _config_cache["instruction"]
+
+
 _description, _instruction = _load_config_from_db()
+_config_cache["instruction"] = _instruction
+_config_cache["description"] = _description
+_config_cache["ts"] = _time.time()
 
 root_agent = Agent(
     model='gemini-2.5-flash',
     name='root_agent',
     description=_description,
-    instruction=_instruction,
+    instruction=_dynamic_instruction,
     tools=[schedule_followup, cancel_followup, cancel_all_followups],
 )

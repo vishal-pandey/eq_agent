@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EQ Helper — Admin</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@milkdown/theme-nord@7.8.0/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@milkdown/crepe@7.8.0/theme/common/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@milkdown/crepe@7.8.0/theme/frame-dark.css">
 <style>
 :root{--g:#00a884;--dk:#111b21;--pn:#202c33;--sb:#111b21;--bg:#0b141a;--hv:#2a3942;--bd:#2a3942;--tx:#e9edef;--t2:#8696a0;--in:#202c33;--out:#005c4b;--hd:#202c33}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -92,6 +93,10 @@ body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;background:var(--dk);colo
 .field-label{font-size:.82em;color:var(--t2);margin-bottom:6px;margin-top:16px;display:flex;justify-content:space-between;align-items:center}
 .field-label:first-child{margin-top:0}
 .editor-wrap{border:1px solid var(--bd);border-radius:8px;background:var(--pn);min-height:120px;overflow:auto}
+.editor-wrap .crepe-editor{min-height:100px}
+.editor-wrap .ProseMirror{padding:12px;min-height:100px;outline:none;color:var(--tx)}
+.editor-wrap .ProseMirror h1,.editor-wrap .ProseMirror h2,.editor-wrap .ProseMirror h3{color:var(--g)}
+.editor-wrap .ProseMirror p{margin-bottom:6px}
 .editor-wrap .milkdown{padding:12px;color:var(--tx);min-height:100px;outline:none}
 .editor-wrap .milkdown *{color:var(--tx)}
 .editor-wrap .milkdown h1,.editor-wrap .milkdown h2,.editor-wrap .milkdown h3{color:var(--g)}
@@ -147,45 +152,48 @@ textarea.fallback-editor:focus{border-color:var(--g)}
 </div>
 
 <script type="module">
-import {Editor,rootCtx,defaultValueCtx} from 'https://esm.sh/@milkdown/kit@7.8.0/core';
-import {commonmark} from 'https://esm.sh/@milkdown/kit@7.8.0/preset/commonmark';
-import {listener,listenerCtx} from 'https://esm.sh/@milkdown/kit@7.8.0/plugin/listener';
-import {history} from 'https://esm.sh/@milkdown/kit@7.8.0/plugin/history';
-import {getMarkdown,replaceAll} from 'https://esm.sh/@milkdown/kit@7.8.0/utils';
+import {Crepe} from 'https://esm.sh/@milkdown/crepe@7.8.0';
 
-let descEditor=null,instrEditor=null;
-let descMd='',instrMd='';
-
-async function createMkEditor(el,initial,onChange){
-  const e=Editor.make()
-    .config(ctx=>{ctx.set(rootCtx,el);ctx.set(defaultValueCtx,initial||'');ctx.get(listenerCtx).markdownUpdated((_,md)=>{onChange(md)})})
-    .use(commonmark).use(listener).use(history);
-  await e.create();
-  return e;
-}
+let descCrepe=null,instrCrepe=null;
 
 window._mkInit=async function(descVal,instrVal){
-  descMd=descVal||'';instrMd=instrVal||'';
   const dEl=document.getElementById('descEditor');
   const iEl=document.getElementById('instrEditor');
   if(!dEl||!iEl)return;
-  if(descEditor){try{descEditor.destroy()}catch(e){}}
-  if(instrEditor){try{instrEditor.destroy()}catch(e){}}
+
+  // Destroy previous instances
+  if(descCrepe){try{descCrepe.destroy()}catch(e){}}
+  if(instrCrepe){try{instrCrepe.destroy()}catch(e){}}
+  descCrepe=null;instrCrepe=null;
   dEl.innerHTML='';iEl.innerHTML='';
+
   try{
-    descEditor=await createMkEditor(dEl,descMd,md=>{descMd=md});
-    instrEditor=await createMkEditor(iEl,instrMd,md=>{instrMd=md});
+    descCrepe=new Crepe({root:dEl,defaultValue:descVal||''});
+    await descCrepe.create();
+    instrCrepe=new Crepe({root:iEl,defaultValue:instrVal||''});
+    await instrCrepe.create();
   }catch(e){
-    console.error('Milkdown init failed, using textarea fallback',e);
-    dEl.parentElement.innerHTML=`<textarea class="fallback-editor" id="descFallback">${esc(descMd)}</textarea>`;
-    iEl.parentElement.innerHTML=`<textarea class="fallback-editor" id="instrFallback">${esc(instrMd)}</textarea>`;
+    console.error('Milkdown Crepe init failed, using textarea fallback',e);
+    descCrepe=null;instrCrepe=null;
+    dEl.parentElement.innerHTML='<textarea class="fallback-editor" id="descFallback">'+escHtml(descVal||'')+'</textarea>';
+    iEl.parentElement.innerHTML='<textarea class="fallback-editor" id="instrFallback">'+escHtml(instrVal||'')+'</textarea>';
   }
 };
 
-window._mkGetDesc=()=>{const fb=document.getElementById('descFallback');return fb?fb.value:descMd};
-window._mkGetInstr=()=>{const fb=document.getElementById('instrFallback');return fb?fb.value:instrMd};
+window._mkGetDesc=()=>{
+  const fb=document.getElementById('descFallback');
+  if(fb)return fb.value;
+  if(descCrepe)try{return descCrepe.getMarkdown()}catch(e){}
+  return'';
+};
+window._mkGetInstr=()=>{
+  const fb=document.getElementById('instrFallback');
+  if(fb)return fb.value;
+  if(instrCrepe)try{return instrCrepe.getMarkdown()}catch(e){}
+  return'';
+};
 
-function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 </script>
 <script>
 // ============ State ============
