@@ -359,8 +359,11 @@ async def _refresh_config_cache():
         if row:
             _config_cache["instruction"] = row["instruction"]
             _config_cache["description"] = row["description"]
-    except Exception:
-        pass  # keep stale cache on failure
+            print(f"✅ Refreshed agent config from DB (len={len(row['instruction'])})")
+        else:
+            print("⚠️  No active agent_config row found in DB")
+    except Exception as exc:
+        print(f"⚠️  Failed to refresh agent config: {exc}")
     _config_cache["ts"] = _time.time()
 
 
@@ -371,10 +374,11 @@ async def _dynamic_instruction(ctx) -> str:
     return _config_cache["instruction"]
 
 
+# Initial load: seed cache with defaults, force refresh on first request
 _description, _instruction = _load_config_from_db()
 _config_cache["instruction"] = _instruction
 _config_cache["description"] = _description
-_config_cache["ts"] = _time.time()
+_config_cache["ts"] = 0  # force refresh on first request
 
 root_agent = Agent(
     model='gemini-2.5-flash',
