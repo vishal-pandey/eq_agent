@@ -180,8 +180,8 @@ async def get_conversations(token: str | None = Cookie(None)):
                 "user_id": r["user_id"],
                 "app_name": r["app_name"],
                 "message_count": r["message_count"],
-                "first_ts": r["first_ts"].isoformat(),
-                "last_ts": r["last_ts"].isoformat(),
+                "first_ts": r["first_ts"].isoformat() + "Z",
+                "last_ts": r["last_ts"].isoformat() + "Z",
                 "preview": previews.get(r["session_id"], ""),
             }
             for r in rows
@@ -213,7 +213,7 @@ async def get_conversation(session_id: str, token: str | None = Cookie(None)):
             {
                 "author": m["author"],
                 "text": m["text"] or "",
-                "timestamp": m["timestamp"].isoformat(),
+                "timestamp": m["timestamp"].isoformat() + "Z",
             }
             for m in msgs
         ],
