@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EQ Helper — Admin</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@milkdown/theme-nord@7.8.0/style.css">
+<style>
+:root{--g:#00a884;--dk:#111b21;--pn:#202c33;--sb:#111b21;--bg:#0b141a;--hv:#2a3942;--bd:#2a3942;--tx:#e9edef;--t2:#8696a0;--in:#202c33;--out:#005c4b;--hd:#202c33}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;background:var(--dk);color:var(--tx);height:100vh;overflow:hidden}
+.login-overlay{position:fixed;inset:0;background:var(--dk);display:flex;align-items:center;justify-content:center;z-index:999}
+.login-overlay.hidden{display:none}
+.login-box{background:var(--pn);padding:40px;border-radius:12px;width:360px;text-align:center}
+.login-box h2{color:var(--g);margin-bottom:8px;font-size:1.5em}
+.login-box p{color:var(--t2);margin-bottom:24px;font-size:.9em}
+.login-box input{width:100%;padding:12px 16px;margin-bottom:12px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:1em;outline:none}
+.login-box input:focus{border-color:var(--g)}
+.login-box button{width:100%;padding:12px;background:var(--g);color:#fff;border:none;border-radius:8px;font-size:1em;cursor:pointer;margin-top:4px}
+.login-box button:hover{opacity:.9}
+.login-error{color:#ef4444;font-size:.85em;margin-top:8px;min-height:20px}
+.app{display:flex;height:100vh}
+</style>
+</head>
+<body>
+<!-- Login -->
+<div class="login-overlay" id="loginOverlay">
+<div class="login-box">
+<h2>EQ Helper</h2>
+<p>Admin Panel</p>
+<input type="text" id="loginUser" placeholder="Username" autocomplete="username">
+<input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
+<button onclick="doLogin()">Sign In</button>
+<div class="login-error" id="loginError"></div>
+</div>
+</div>
+<!-- Main -->
+<div class="app" id="mainApp" style="display:none">
+<div class="sidebar" id="sidebar"></div>
+<div class="main-content" id="mainContent"></div>
+</div>
+<style>
+/* Sidebar */
+.sidebar{width:380px;min-width:380px;background:var(--sb);border-right:1px solid var(--bd);display:flex;flex-direction:column}
+.sidebar-header{padding:12px 16px;background:var(--hd);border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center}
+.sidebar-header h3{color:var(--tx);font-size:1em}
+.sidebar-header .stats{color:var(--t2);font-size:.72em}
+.hdr-btns{display:flex;gap:6px;align-items:center}
+.tab-btn{background:none;border:1px solid var(--bd);color:var(--t2);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.78em}
+.tab-btn:hover,.tab-btn.active{color:var(--tx);border-color:var(--g);background:rgba(0,168,132,.1)}
+.logout-btn{background:none;border:1px solid var(--bd);color:var(--t2);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.78em}
+.logout-btn:hover{color:var(--tx);border-color:var(--t2)}
+.search-box{padding:8px 12px;background:var(--pn);border-bottom:1px solid var(--bd)}
+.search-box input{width:100%;padding:8px 14px;background:var(--bg);border:none;border-radius:8px;color:var(--tx);font-size:.9em;outline:none}
+.conv-list{flex:1;overflow-y:auto}
+.conv-item{display:flex;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--bd);transition:background .15s}
+.conv-item:hover{background:var(--hv)}
+.conv-item.active{background:var(--hv)}
+.conv-avatar{width:44px;height:44px;border-radius:50%;background:var(--g);display:flex;align-items:center;justify-content:center;font-size:1.1em;color:#fff;font-weight:bold;flex-shrink:0}
+.conv-info{margin-left:12px;flex:1;min-width:0}
+.conv-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+.conv-name{font-size:.92em;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv-time{font-size:.7em;color:var(--t2);flex-shrink:0;margin-left:8px}
+.conv-bottom{display:flex;justify-content:space-between;align-items:center}
+.conv-preview{font-size:.8em;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.conv-badge{background:var(--g);color:#fff;font-size:.68em;font-weight:bold;padding:2px 7px;border-radius:10px;margin-left:8px;flex-shrink:0}
+/* Main content */
+.main-content{flex:1;display:flex;flex-direction:column;background:var(--bg)}
+/* Chat */
+.chat-header{padding:12px 20px;background:var(--hd);border-bottom:1px solid var(--bd);display:flex;align-items:center}
+.chat-header .conv-avatar{width:38px;height:38px;font-size:.95em}
+.chat-header-info{margin-left:12px}
+.chat-header-name{font-size:.92em}
+.chat-header-sub{font-size:.75em;color:var(--t2)}
+.chat-messages{flex:1;overflow-y:auto;padding:16px 50px}
+.empty-chat{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;color:var(--t2)}
+.empty-chat p{font-size:1em}
+.msg{max-width:65%;padding:7px 11px;margin-bottom:3px;border-radius:8px;line-height:1.4;font-size:.88em;word-wrap:break-word;white-space:pre-wrap}
+.msg.user{background:var(--out);margin-left:auto;border-top-right-radius:0}
+.msg.root_agent{background:var(--in);margin-right:auto;border-top-left-radius:0}
+.msg-time{font-size:.66em;color:var(--t2);text-align:right;margin-top:3px}
+.msg-date-sep{text-align:center;margin:14px 0 10px}
+.msg-date-sep span{background:var(--pn);color:var(--t2);padding:4px 12px;border-radius:8px;font-size:.76em}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
+</style>
+<style>
+/* Settings panel */
+.settings-panel{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.settings-header{padding:14px 24px;background:var(--hd);border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center}
+.settings-header h3{font-size:1em}
+.settings-body{flex:1;overflow-y:auto;padding:20px 24px}
+.field-label{font-size:.82em;color:var(--t2);margin-bottom:6px;margin-top:16px;display:flex;justify-content:space-between;align-items:center}
+.field-label:first-child{margin-top:0}
+.editor-wrap{border:1px solid var(--bd);border-radius:8px;background:var(--pn);min-height:120px;overflow:auto}
+.editor-wrap .milkdown{padding:12px;color:var(--tx);min-height:100px;outline:none}
+.editor-wrap .milkdown *{color:var(--tx)}
+.editor-wrap .milkdown h1,.editor-wrap .milkdown h2,.editor-wrap .milkdown h3{color:var(--g)}
+.editor-wrap .milkdown code{background:var(--bg);padding:2px 6px;border-radius:4px;font-size:.9em}
+.editor-wrap .milkdown blockquote{border-left:3px solid var(--g);padding-left:12px;color:var(--t2)}
+.editor-wrap .milkdown ul,.editor-wrap .milkdown ol{padding-left:20px}
+.editor-wrap .milkdown p{margin-bottom:8px}
+textarea.fallback-editor{width:100%;min-height:200px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:12px;font-family:'Fira Code',monospace;font-size:.88em;resize:vertical;outline:none}
+textarea.fallback-editor:focus{border-color:var(--g)}
+.save-btn{background:var(--g);color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:.92em;cursor:pointer;margin-top:20px}
+.save-btn:hover{opacity:.9}
+.save-btn:disabled{opacity:.5;cursor:not-allowed}
+.save-msg{font-size:.82em;margin-left:12px;display:inline-block}
+.save-msg.ok{color:var(--g)}.save-msg.err{color:#ef4444}
+/* Version history sidebar */
+.version-list{margin-top:20px;border-top:1px solid var(--bd);padding-top:16px}
+.version-list h4{font-size:.88em;color:var(--t2);margin-bottom:10px}
+.ver-item{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;margin-bottom:8px;cursor:pointer;transition:border-color .15s}
+.ver-item:hover{border-color:var(--g)}
+.ver-item.active-ver{border-color:var(--g);background:rgba(0,168,132,.08)}
+.ver-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.ver-num{font-size:.88em;font-weight:bold}
+.ver-badge{font-size:.68em;background:var(--g);color:#fff;padding:2px 8px;border-radius:10px}
+.ver-date{font-size:.72em;color:var(--t2)}
+.ver-preview{font-size:.78em;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ver-actions{display:flex;gap:6px;margin-top:8px}
+.ver-btn{font-size:.75em;padding:4px 10px;border-radius:6px;cursor:pointer;border:1px solid var(--bd);background:none;color:var(--t2)}
+.ver-btn:hover{color:var(--tx);border-color:var(--t2)}
+.ver-btn.rollback{border-color:#f59e0b;color:#f59e0b}
+.ver-btn.rollback:hover{background:rgba(245,158,11,.1)}
+/* Diff modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:none;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal-box{background:var(--pn);border-radius:12px;max-width:900px;width:95%;max-height:85vh;display:flex;flex-direction:column}
+.modal-hdr{padding:16px 20px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center}
+.modal-hdr h3{font-size:1em}
+.modal-close{background:none;border:none;color:var(--t2);font-size:1.4em;cursor:pointer;padding:4px 8px}
+.modal-close:hover{color:var(--tx)}
+.modal-body{flex:1;overflow-y:auto;padding:16px 20px}
+.diff-block{margin-bottom:16px}
+.diff-block h4{font-size:.85em;color:var(--g);margin-bottom:8px}
+.diff-line{font-family:'Fira Code',monospace;font-size:.8em;padding:2px 8px;white-space:pre-wrap;word-break:break-all}
+.diff-line.add{background:rgba(0,168,132,.15);color:#4ade80}
+.diff-line.del{background:rgba(239,68,68,.15);color:#f87171}
+.diff-line.ctx{color:var(--t2)}
+</style>
+<!-- Diff modal -->
+<div class="modal-overlay" id="diffModal">
+<div class="modal-box">
+<div class="modal-hdr"><h3 id="diffTitle">Diff</h3><button class="modal-close" onclick="closeDiff()">&times;</button></div>
+<div class="modal-body" id="diffBody"></div>
+</div>
+</div>
+
+<script type="module">
+import {Editor,rootCtx,defaultValueCtx} from 'https://esm.sh/@milkdown/kit@7.8.0/core';
+import {commonmark} from 'https://esm.sh/@milkdown/kit@7.8.0/preset/commonmark';
+import {listener,listenerCtx} from 'https://esm.sh/@milkdown/kit@7.8.0/plugin/listener';
+import {history} from 'https://esm.sh/@milkdown/kit@7.8.0/plugin/history';
+import {getMarkdown,replaceAll} from 'https://esm.sh/@milkdown/kit@7.8.0/utils';
+
+let descEditor=null,instrEditor=null;
+let descMd='',instrMd='';
+
+async function createMkEditor(el,initial,onChange){
+  const e=Editor.make()
+    .config(ctx=>{ctx.set(rootCtx,el);ctx.set(defaultValueCtx,initial||'');ctx.get(listenerCtx).markdownUpdated((_,md)=>{onChange(md)})})
+    .use(commonmark).use(listener).use(history);
+  await e.create();
+  return e;
+}
+
+window._mkInit=async function(descVal,instrVal){
+  descMd=descVal||'';instrMd=instrVal||'';
+  const dEl=document.getElementById('descEditor');
+  const iEl=document.getElementById('instrEditor');
+  if(!dEl||!iEl)return;
+  if(descEditor){try{descEditor.destroy()}catch(e){}}
+  if(instrEditor){try{instrEditor.destroy()}catch(e){}}
+  dEl.innerHTML='';iEl.innerHTML='';
+  try{
+    descEditor=await createMkEditor(dEl,descMd,md=>{descMd=md});
+    instrEditor=await createMkEditor(iEl,instrMd,md=>{instrMd=md});
+  }catch(e){
+    console.error('Milkdown init failed, using textarea fallback',e);
+    dEl.parentElement.innerHTML=`<textarea class="fallback-editor" id="descFallback">${esc(descMd)}</textarea>`;
+    iEl.parentElement.innerHTML=`<textarea class="fallback-editor" id="instrFallback">${esc(instrMd)}</textarea>`;
+  }
+};
+
+window._mkGetDesc=()=>{const fb=document.getElementById('descFallback');return fb?fb.value:descMd};
+window._mkGetInstr=()=>{const fb=document.getElementById('instrFallback');return fb?fb.value:instrMd};
+
+function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+</script>
+<script>
+// ============ State ============
+let conversations=[],activeSession=null,currentTab='chats',versions=[];
+
+// ============ Auth ============
+async function doLogin(){
+  const u=document.getElementById('loginUser').value,p=document.getElementById('loginPass').value,err=document.getElementById('loginError');
+  err.textContent='';
+  try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
+  if(!r.ok){err.textContent='Invalid credentials';return}
+  document.getElementById('loginOverlay').classList.add('hidden');document.getElementById('mainApp').style.display='flex';switchTab('chats')}catch(e){err.textContent='Connection error'}
+}
+async function doLogout(){await fetch('/api/logout',{method:'POST'});location.reload()}
+document.getElementById('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+document.getElementById('loginUser').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginPass').focus()});
+
+// ============ Tabs ============
+function switchTab(tab){
+  currentTab=tab;activeSession=null;
+  if(tab==='chats'){renderChatSidebar();renderEmptyChat();loadConversations()}
+  else{renderSettingsSidebar();renderSettingsPanel()}
+}
+
+// ============ Chat sidebar ============
+function renderChatSidebar(){
+  document.getElementById('sidebar').innerHTML=`
+    <div class="sidebar-header"><div><h3>EQ Helper Admin</h3><div class="stats" id="statsLine">Loading…</div></div>
+    <div class="hdr-btns"><button class="tab-btn active" onclick="switchTab('chats')">Chats</button><button class="tab-btn" onclick="switchTab('settings')">Settings</button><button class="logout-btn" onclick="doLogout()">Logout</button></div></div>
+    <div class="search-box"><input type="text" id="searchInput" placeholder="Search conversations…" oninput="renderConvList(filterConvs())"></div>
+    <div class="conv-list" id="convList"></div>`;
+}
+function renderEmptyChat(){
+  document.getElementById('mainContent').innerHTML='<div class="empty-chat"><p>Select a conversation to view messages</p></div>';
+}
+async function loadConversations(){
+  try{const r=await fetch('/api/conversations');if(r.status===401){location.reload();return}
+  const d=await r.json();conversations=d.conversations;
+  const sl=document.getElementById('statsLine');if(sl)sl.textContent=`${d.unique_users} users · ${d.total_sessions} sessions · ${d.total_messages} messages`;
+  renderConvList(conversations)}catch(e){console.error(e)}
+}
+function filterConvs(){const q=(document.getElementById('searchInput')||{}).value||'';if(!q)return conversations;const l=q.toLowerCase();return conversations.filter(c=>c.user_id.toLowerCase().includes(l)||c.session_id.toLowerCase().includes(l)||(c.preview||'').toLowerCase().includes(l))}
+function renderConvList(list){
+  const el=document.getElementById('convList');if(!el)return;
+  if(!list.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2)">No conversations yet</div>';return}
+  el.innerHTML=list.map(c=>{const ini=(c.user_id||'?').substring(0,2).toUpperCase();const act=c.session_id===activeSession?' active':'';
+  return`<div class="conv-item${act}" onclick="openChat('${c.session_id}')"><div class="conv-avatar">${ini}</div><div class="conv-info"><div class="conv-top"><span class="conv-name">${esc(c.user_id)}</span><span class="conv-time">${relTime(c.last_ts)}</span></div><div class="conv-bottom"><span class="conv-preview">${esc(c.preview||'No messages')}</span><span class="conv-badge">${c.message_count}</span></div></div></div>`}).join('');
+}
+async function openChat(sid){
+  activeSession=sid;renderConvList(filterConvs());const conv=conversations.find(c=>c.session_id===sid);const area=document.getElementById('mainContent');
+  area.innerHTML=`<div class="chat-header"><div class="conv-avatar">${(conv?.user_id||'?').substring(0,2).toUpperCase()}</div><div class="chat-header-info"><div class="chat-header-name">${esc(conv?.user_id||sid)}</div><div class="chat-header-sub">Session: ${sid}</div></div></div><div class="chat-messages" id="chatMessages"><div style="padding:40px;text-align:center;color:var(--t2)">Loading…</div></div>`;
+  try{const r=await fetch(`/api/conversations/${sid}`);if(r.status===401){location.reload();return}const d=await r.json();const me=document.getElementById('chatMessages');let h='',ld='';
+  d.messages.forEach(m=>{const dt=new Date(m.timestamp);const ds=dt.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'});if(ds!==ld){h+=`<div class="msg-date-sep"><span>${ds}</span></div>`;ld=ds}
+  const ts=dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});const cls=m.author==='user'?'user':'root_agent';h+=`<div class="msg ${cls}">${esc(m.text)}<div class="msg-time">${ts}</div></div>`});
+  me.innerHTML=h||'<div style="padding:40px;text-align:center;color:var(--t2)">No messages</div>';me.scrollTop=me.scrollHeight}catch(e){console.error(e)}
+}
+
+// ============ Helpers ============
+function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function relTime(iso){const d=new Date(iso),now=new Date(),diff=now-d,mins=Math.floor(diff/60000);if(mins<1)return'now';if(mins<60)return mins+'m';const hrs=Math.floor(mins/60);if(hrs<24)return hrs+'h';const days=Math.floor(hrs/24);if(days<7)return days+'d';return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}
+function fmtDate(iso){return new Date(iso).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+
+setInterval(()=>{if(currentTab==='chats')loadConversations()},30000);
+</script>
+<script>
+// ============ Settings sidebar (version list) ============
+function renderSettingsSidebar(){
+  document.getElementById('sidebar').innerHTML=`
+    <div class="sidebar-header"><div><h3>Agent Config</h3><div class="stats">Version history</div></div>
+    <div class="hdr-btns"><button class="tab-btn" onclick="switchTab('chats')">Chats</button><button class="tab-btn active" onclick="switchTab('settings')">Settings</button><button class="logout-btn" onclick="doLogout()">Logout</button></div></div>
+    <div class="conv-list" id="versionList"><div style="padding:40px;text-align:center;color:var(--t2)">Loading…</div></div>`;
+  loadVersions();
+}
+
+async function loadVersions(){
+  try{const r=await fetch('/api/config/versions');if(r.status===401){location.reload();return}
+  const d=await r.json();versions=d.versions;renderVersionList()}catch(e){console.error(e)}
+}
+
+function renderVersionList(){
+  const el=document.getElementById('versionList');if(!el)return;
+  if(!versions.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2)">No versions yet. Save your first config.</div>';return}
+  el.innerHTML=versions.map(v=>`
+    <div class="ver-item${v.is_active?' active-ver':''}" onclick="viewVersion(${v.id})">
+      <div class="ver-top"><span class="ver-num">v${v.version}</span>${v.is_active?'<span class="ver-badge">ACTIVE</span>':''}</div>
+      <div class="ver-date">${fmtDate(v.created_at)}</div>
+      <div class="ver-preview">${esc((v.description_preview||'').substring(0,80))}</div>
+      <div class="ver-actions">
+        ${v.is_active?'':'<button class="ver-btn rollback" onclick="event.stopPropagation();doRollback('+v.id+','+v.version+')">Rollback</button>'}
+        ${versions.length>1?'<button class="ver-btn" onclick="event.stopPropagation();showDiff('+v.id+')">Diff</button>':''}
+      </div>
+    </div>`).join('');
+}
+
+async function viewVersion(id){
+  try{const r=await fetch(`/api/config/versions/${id}`);if(!r.ok)return;const d=await r.json();
+  renderSettingsPanel(d)}catch(e){console.error(e)}
+}
+
+async function doRollback(id,ver){
+  if(!confirm(`Rollback to v${ver}? This creates a new active version with that content.`))return;
+  try{const r=await fetch(`/api/config/rollback/${id}`,{method:'POST'});if(r.status===401){location.reload();return}
+  const d=await r.json();if(d.ok){loadVersions();renderSettingsPanel()}}catch(e){alert('Rollback failed: '+e)}
+}
+
+// ============ Settings panel ============
+async function renderSettingsPanel(prefill){
+  let cfg=prefill;
+  if(!cfg){try{const r=await fetch('/api/config/current');if(r.ok)cfg=await r.json()}catch(e){}}
+  const desc=cfg?.description||'';const instr=cfg?.instruction||'';const ver=cfg?.version||0;
+  const isView=prefill&&!prefill.is_active;
+
+  document.getElementById('mainContent').innerHTML=`
+    <div class="settings-panel">
+      <div class="settings-header">
+        <h3>${isView?'Viewing v'+prefill.version:'Edit Agent Config'} ${ver?' (current: v'+ver+')':' (no config saved yet)'}</h3>
+        ${isView?'<button class="tab-btn" onclick="renderSettingsPanel()">← Back to Editor</button>':''}
+      </div>
+      <div class="settings-body">
+        <div class="field-label">Description <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
+        <div class="editor-wrap"><div id="descEditor"></div></div>
+        <div class="field-label" style="margin-top:20px">Instruction <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
+        <div class="editor-wrap" style="min-height:300px"><div id="instrEditor"></div></div>
+        ${isView?'':'<div style="margin-top:20px"><button class="save-btn" id="saveBtn" onclick="saveConfig()">Save New Version</button><span class="save-msg" id="saveMsg"></span></div>'}
+        <div style="height:40px"></div>
+      </div>
+    </div>`;
+
+  // Init Milkdown editors
+  if(window._mkInit){await window._mkInit(desc,instr)}
+}
+
+async function saveConfig(){
+  const desc=window._mkGetDesc?window._mkGetDesc():'';
+  const instr=window._mkGetInstr?window._mkGetInstr():'';
+  const btn=document.getElementById('saveBtn');const msg=document.getElementById('saveMsg');
+  if(!desc.trim()||!instr.trim()){msg.className='save-msg err';msg.textContent='Both fields are required';return}
+  btn.disabled=true;msg.className='save-msg';msg.textContent='Saving…';
+  try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc,instruction:instr})});
+  if(r.status===401){location.reload();return}const d=await r.json();
+  if(d.ok){msg.className='save-msg ok';msg.textContent=`Saved as v${d.version}! Restart agent to apply.`;loadVersions()}
+  else{msg.className='save-msg err';msg.textContent='Save failed'}}
+  catch(e){msg.className='save-msg err';msg.textContent='Error: '+e}
+  finally{btn.disabled=false}
+}
+
+// ============ Diff ============
+async function showDiff(versionId){
+  const ver=versions.find(v=>v.id===versionId);if(!ver)return;
+  // Find the previous version
+  const idx=versions.findIndex(v=>v.id===versionId);
+  const prevVer=versions[idx+1];// versions sorted DESC so idx+1 is older
+  if(!prevVer){alert('No previous version to compare against');return}
+
+  try{
+    const [rCur,rPrev]=await Promise.all([fetch(`/api/config/versions/${versionId}`),fetch(`/api/config/versions/${prevVer.id}`)]);
+    const cur=await rCur.json(),prev=await rPrev.json();
+    document.getElementById('diffTitle').textContent=`Diff: v${prev.version} → v${cur.version}`;
+    const descDiff=computeDiff(prev.description,cur.description);
+    const instrDiff=computeDiff(prev.instruction,cur.instruction);
+    document.getElementById('diffBody').innerHTML=`
+      <div class="diff-block"><h4>Description</h4>${renderDiffHtml(descDiff)}</div>
+      <div class="diff-block"><h4>Instruction</h4>${renderDiffHtml(instrDiff)}</div>`;
+    document.getElementById('diffModal').classList.add('show');
+  }catch(e){alert('Failed to load diff: '+e)}
+}
+
+function closeDiff(){document.getElementById('diffModal').classList.remove('show')}
+document.getElementById('diffModal').addEventListener('click',e=>{if(e.target.id==='diffModal')closeDiff()});
+
+// Simple line-based diff
+function computeDiff(oldText,newText){
+  const oldLines=(oldText||'').split('\n'),newLines=(newText||'').split('\n');
+  const result=[];let oi=0,ni=0;
+  // LCS-based approach is complex; use a simple sequential diff
+  const max=Math.max(oldLines.length,newLines.length);
+  // Build a map for quick lookup
+  const oldSet=new Map();oldLines.forEach((l,i)=>{if(!oldSet.has(l))oldSet.set(l,[]);oldSet.get(l).push(i)});
+  const used=new Set();
+  for(let i=0;i<newLines.length;i++){
+    const line=newLines[i];
+    if(oldSet.has(line)){
+      const indices=oldSet.get(line);
+      const idx=indices.find(j=>!used.has(j));
+      if(idx!==undefined){
+        // Output any old lines before idx that weren't matched as deletions
+        while(oi<=idx){if(oi<idx&&!used.has(oi)){result.push({type:'del',text:oldLines[oi]})}if(oi===idx){used.add(oi)}oi++}
+        result.push({type:'ctx',text:line});continue
+      }
+    }
+    result.push({type:'add',text:line});
+  }
+  // Remaining old lines
+  for(let i=oi;i<oldLines.length;i++){if(!used.has(i))result.push({type:'del',text:oldLines[i]})}
+  return result;
+}
+
+function renderDiffHtml(diff){
+  if(!diff.length)return'<div class="diff-line ctx">(empty)</div>';
+  return diff.map(d=>{
+    const prefix=d.type==='add'?'+ ':d.type==='del'?'- ':'  ';
+    return`<div class="diff-line ${d.type}">${esc(prefix+d.text)}</div>`
+  }).join('');
+}
+
+// ============ Init ============
+(async()=>{
+  try{const r=await fetch('/api/me');if(r.ok){document.getElementById('loginOverlay').classList.add('hidden');document.getElementById('mainApp').style.display='flex';switchTab('chats')}}catch(e){}
+})();
+</script>
+</body>
+</html>

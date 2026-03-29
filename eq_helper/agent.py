@@ -179,13 +179,13 @@ async def cancel_all_followups(
 # Agent
 # ---------------------------------------------------------------------------
 
-DESCRIPTION = (
+DEFAULT_DESCRIPTION = (
     "Compassionate AI parenting coach that helps parents reduce screen "
     "dependency in children aged 2-5 through short, conversational guidance "
     "and proactive follow-ups."
 )
 
-INSTRUCTION = """\
+DEFAULT_INSTRUCTION = """\
 You are a warm, supportive AI parenting coach helping parents manage screen \
 dependency in children aged 2 to 5. You communicate via WhatsApp, so keep \
 every message short — like texting a friend who is also a child-development \
@@ -290,10 +290,55 @@ behavioral issues, gently suggest consulting a pediatrician. Do not diagnose.
 if asked.
 """
 
+
+def _load_config_from_db() -> tuple[str, str]:
+    """Synchronously load latest agent config from DB. Falls back to defaults."""
+    import asyncio
+    import asyncpg as _apg
+
+    db_url = os.environ.get("DATABASE_URL", "")
+    if not db_url:
+        return DEFAULT_DESCRIPTION, DEFAULT_INSTRUCTION
+    # asyncpg needs plain postgresql:// URL
+    if "+asyncpg" in db_url:
+        db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    async def _fetch():
+        try:
+            conn = await _apg.connect(db_url)
+            row = await conn.fetchrow(
+                "SELECT description, instruction FROM agent_config "
+                "WHERE is_active = true ORDER BY version DESC LIMIT 1"
+            )
+            await conn.close()
+            if row:
+                return row["description"], row["instruction"]
+        except Exception as e:
+            print(f"⚠️  Could not load agent config from DB: {e}")
+        return None
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            result = None  # Can't run sync in running loop at import time
+        else:
+            result = loop.run_until_complete(_fetch())
+    except RuntimeError:
+        result = asyncio.run(_fetch())
+
+    if result:
+        print("✅ Loaded agent config from database")
+        return result
+    print("ℹ️  Using default agent config (no DB config found)")
+    return DEFAULT_DESCRIPTION, DEFAULT_INSTRUCTION
+
+
+_description, _instruction = _load_config_from_db()
+
 root_agent = Agent(
     model='gemini-2.5-flash',
     name='root_agent',
-    description=DESCRIPTION,
-    instruction=INSTRUCTION,
+    description=_description,
+    instruction=_instruction,
     tools=[schedule_followup, cancel_followup, cancel_all_followups],
 )
