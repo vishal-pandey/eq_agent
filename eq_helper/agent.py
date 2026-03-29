@@ -371,7 +371,10 @@ async def _dynamic_instruction(ctx) -> str:
     """ADK InstructionProvider — returns latest instruction from DB."""
     if _time.time() - _config_cache["ts"] > _CACHE_TTL:
         await _refresh_config_cache()
-    return _config_cache["instruction"]
+    # Prepend description so the agent knows its identity
+    desc = _config_cache["description"]
+    instr = _config_cache["instruction"]
+    return f"You are: {desc}\n\n{instr}"
 
 
 # Initial load: seed cache with defaults, force refresh on first request
@@ -383,7 +386,7 @@ _config_cache["ts"] = 0  # force refresh on first request
 root_agent = Agent(
     model='gemini-2.5-flash',
     name='root_agent',
-    description=_description,
+    description="AI assistant powered by dynamic configuration.",
     instruction=_dynamic_instruction,
     tools=[schedule_followup, cancel_followup, cancel_all_followups],
 )
