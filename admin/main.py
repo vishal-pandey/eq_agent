@@ -91,6 +91,13 @@ async def logout(token: str | None = Cookie(None)):
     return resp
 
 
+@app.get("/api/me")
+async def me(token: str | None = Cookie(None)):
+    if not _check_auth(token):
+        raise HTTPException(status_code=401)
+    return {"ok": True}
+
+
 # ============================================
 # Content helpers
 # ============================================
@@ -135,7 +142,7 @@ async def get_conversations(token: str | None = Cookie(None)):
                 MIN(timestamp) as first_ts,
                 MAX(timestamp) as last_ts
             FROM events
-            WHERE author IN ('user', 'root_agent')
+            WHERE event_data->>'author' IN ('user', 'root_agent')
             GROUP BY session_id, user_id, app_name
             ORDER BY MAX(timestamp) DESC
         """)
@@ -145,13 +152,14 @@ async def get_conversations(token: str | None = Cookie(None)):
             session_ids = [r["session_id"] for r in rows]
             preview_rows = await conn.fetch("""
                 SELECT DISTINCT ON (session_id)
-                    session_id, content
+                    session_id,
+                    event_data->'content'->'parts'->0->>'text' as preview_text
                 FROM events
-                WHERE session_id = ANY($1) AND author = 'user'
+                WHERE session_id = ANY($1) AND event_data->>'author' = 'user'
                 ORDER BY session_id, timestamp ASC
             """, session_ids)
             for pr in preview_rows:
-                previews[pr["session_id"]] = extract_text(pr["content"])
+                previews[pr["session_id"]] = pr["preview_text"] or ""
 
         stats = await conn.fetchrow("""
             SELECT
@@ -159,7 +167,7 @@ async def get_conversations(token: str | None = Cookie(None)):
                 COUNT(*) as total_messages,
                 COUNT(DISTINCT user_id) as unique_users
             FROM events
-            WHERE author IN ('user', 'root_agent')
+            WHERE event_data->>'author' IN ('user', 'root_agent')
         """)
 
     return {
@@ -187,9 +195,14 @@ async def get_conversation(session_id: str, token: str | None = Cookie(None)):
         raise HTTPException(status_code=401)
     async with db_pool.acquire() as conn:
         msgs = await conn.fetch("""
-            SELECT author, content, timestamp
+            SELECT
+                event_data->>'author' as author,
+                event_data->'content'->'parts'->0->>'text' as text,
+                timestamp
             FROM events
-            WHERE session_id = $1 AND author IN ('user', 'root_agent')
+            WHERE session_id = $1
+              AND event_data->>'author' IN ('user', 'root_agent')
+              AND event_data->'content'->'parts'->0->>'text' IS NOT NULL
             ORDER BY timestamp ASC
         """, session_id)
     if not msgs:
@@ -199,7 +212,7 @@ async def get_conversation(session_id: str, token: str | None = Cookie(None)):
         "messages": [
             {
                 "author": m["author"],
-                "text": extract_text(m["content"]),
+                "text": m["text"] or "",
                 "timestamp": m["timestamp"].isoformat(),
             }
             for m in msgs
@@ -531,6 +544,18 @@ function relTime(iso) {
 
 // Auto-refresh sidebar every 30s
 setInterval(loadConversations, 30000);
+
+// On page load, check if already logged in
+(async () => {
+  try {
+    const r = await fetch('/api/me');
+    if (r.ok) {
+      document.getElementById('loginOverlay').classList.add('hidden');
+      document.getElementById('mainApp').style.display = 'flex';
+      loadConversations();
+    }
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>"""
