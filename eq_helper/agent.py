@@ -384,7 +384,7 @@ _config_cache["description"] = _description
 _config_cache["ts"] = 0  # force refresh on first request
 
 root_agent = Agent(
-    model='gemini-2.5-flash',
+    model='gemini-3.1-pro-preview',
     name='root_agent',
     description="AI assistant powered by dynamic configuration.",
     instruction=_dynamic_instruction,
