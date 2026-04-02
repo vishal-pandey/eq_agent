@@ -371,10 +371,10 @@ async def _dynamic_instruction(ctx) -> str:
     """ADK InstructionProvider — returns latest instruction from DB."""
     if _time.time() - _config_cache["ts"] > _CACHE_TTL:
         await _refresh_config_cache()
-    # Prepend description so the agent knows its identity
     desc = _config_cache["description"]
     instr = _config_cache["instruction"]
-    return f"You are: {desc}\n\n{instr}"
+    now = datetime.now(timezone.utc).strftime("%A, %B %d, %Y %H:%M UTC")
+    return f"Current date and time: {now}\n\nYou are: {desc}\n\n{instr}"
 
 
 # Initial load: seed cache with defaults, force refresh on first request
