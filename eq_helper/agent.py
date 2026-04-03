@@ -374,7 +374,26 @@ async def _dynamic_instruction(ctx) -> str:
     desc = _config_cache["description"]
     instr = _config_cache["instruction"]
     now = datetime.now(timezone.utc).strftime("%A, %B %d, %Y %H:%M UTC")
-    return f"Current date and time: {now}\n\nYou are: {desc}\n\n{instr}"
+    # Strong tool-calling reminder appended at the end (recency bias)
+    tool_reminder = """
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MANDATORY TOOL USAGE — DO NOT SKIP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+At the END of EVERY response where you discuss a plan, give a daily action,
+or complete a check-in, you MUST call the schedule_followup tool to schedule
+the next interaction. This is NOT optional.
+
+Examples of when you MUST schedule:
+- After giving a Morning Nudge → schedule the Evening Check-in (~11.5 hours later)
+- After an Evening Check-in → schedule tomorrow's Morning Nudge (~12.5 hours later)
+- After co-creating a GIP → schedule the Day 1 Morning Nudge
+- After any conversation pause → schedule a check-in within 2-3 hours
+
+If you do NOT call schedule_followup, the parent will receive NO follow-up
+and the GIP will silently break. ALWAYS schedule the next step.
+"""
+    return f"Current date and time: {now}\n\nYou are: {desc}\n\n{instr}{tool_reminder}"
 
 
 # Initial load: seed cache with defaults, force refresh on first request
