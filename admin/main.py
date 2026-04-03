@@ -113,6 +113,15 @@ async def startup():
                 created_at TIMESTAMP NOT NULL DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id SERIAL PRIMARY KEY,
+                session_id VARCHAR NOT NULL,
+                rating INTEGER,
+                message TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
         # Seed v1 with defaults if table is empty
         count = await conn.fetchval("SELECT COUNT(*) FROM agent_config")
         if count == 0:
@@ -252,7 +261,51 @@ async def delete_conversation(session_id: str, token: str | None = Cookie(None))
             )
             await conn.execute("DELETE FROM events WHERE session_id = $1", session_id)
             await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
+            await conn.execute("DELETE FROM feedback WHERE session_id = $1", session_id)
     return {"ok": True, "deleted_events": ev_count or 0}
+
+
+# ============================================
+# Feedback APIs
+# ============================================
+
+@app.post("/api/feedback")
+async def submit_feedback(request: Request):
+    """Public endpoint — no auth required. Called from WhatsApp/n8n."""
+    body = await request.json()
+    session_id = body.get("session_id", "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id required")
+    rating = body.get("rating")  # optional int 1-5
+    message = body.get("message", "").strip()
+    if not rating and not message:
+        raise HTTPException(status_code=400, detail="rating or message required")
+    if rating is not None:
+        rating = int(rating)
+        if rating < 1 or rating > 5:
+            raise HTTPException(status_code=400, detail="rating must be 1-5")
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO feedback (session_id, rating, message)
+            VALUES ($1, $2, $3)
+        """, session_id, rating, message or None)
+    return {"ok": True}
+
+
+@app.get("/api/feedback/{session_id}")
+async def get_feedback(session_id: str, token: str | None = Cookie(None)):
+    if not _check_auth(token):
+        raise HTTPException(status_code=401)
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, rating, message, created_at
+            FROM feedback WHERE session_id = $1
+            ORDER BY created_at ASC
+        """, session_id)
+    return {"feedback": [{
+        "id": r["id"], "rating": r["rating"], "message": r["message"],
+        "created_at": r["created_at"].isoformat() + "Z",
+    } for r in rows]}
 
 
 # ============================================

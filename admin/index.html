@@ -78,6 +78,9 @@ body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;background:var(--dk);colo
 .msg{max-width:65%;padding:7px 11px;margin-bottom:3px;border-radius:8px;line-height:1.4;font-size:.88em;word-wrap:break-word;white-space:pre-wrap}
 .msg.user{background:var(--out);margin-left:auto;border-top-right-radius:0}
 .msg.root_agent{background:var(--in);margin-right:auto;border-top-left-radius:0}
+.msg.feedback{background:#1a1a2e;border:1px solid #f59e0b;margin:8px auto;max-width:80%;border-radius:8px;text-align:center}
+.msg.feedback .fb-label{color:#f59e0b;font-size:.72em;font-weight:bold;margin-bottom:4px}
+.msg.feedback .fb-stars{color:#f59e0b;font-size:1.1em;letter-spacing:2px}
 .msg-time{font-size:.66em;color:var(--t2);text-align:right;margin-top:3px}
 .msg-date-sep{text-align:center;margin:14px 0 10px}
 .msg-date-sep span{background:var(--pn);color:var(--t2);padding:4px 12px;border-radius:8px;font-size:.76em}
@@ -244,9 +247,22 @@ function renderConvList(list){
 async function openChat(sid){
   activeSession=sid;renderConvList(filterConvs());const conv=conversations.find(c=>c.session_id===sid);const area=document.getElementById('mainContent');
   area.innerHTML=`<div class="chat-header"><div class="conv-avatar">${(conv?.user_id||'?').substring(0,2).toUpperCase()}</div><div class="chat-header-info"><div class="chat-header-name">${esc(conv?.user_id||sid)}</div><div class="chat-header-sub">Session: ${sid}</div></div><button onclick="deleteConversation('${sid}')" style="margin-left:auto;background:none;border:1px solid #ef4444;color:#ef4444;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:.78em">Delete</button></div><div class="chat-messages" id="chatMessages"><div style="padding:40px;text-align:center;color:var(--t2)">Loading…</div></div>`;
-  try{const r=await fetch(`/api/conversations/${sid}`);if(r.status===401){location.reload();return}const d=await r.json();const me=document.getElementById('chatMessages');let h='',ld='';
-  d.messages.forEach(m=>{const dt=new Date(m.timestamp);const ds=dt.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'});if(ds!==ld){h+=`<div class="msg-date-sep"><span>${ds}</span></div>`;ld=ds}
-  const ts=dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});const cls=m.author==='user'?'user':'root_agent';h+=`<div class="msg ${cls}">${esc(m.text)}<div class="msg-time">${ts}</div></div>`});
+  try{const r=await fetch(`/api/conversations/${sid}`);if(r.status===401){location.reload();return}const d=await r.json();
+  const fr=await fetch(`/api/feedback/${sid}`);const fd=fr.ok?await fr.json():{feedback:[]};
+  // Merge messages and feedback by timestamp
+  const items=[];
+  d.messages.forEach(m=>items.push({type:'msg',author:m.author,text:m.text,timestamp:m.timestamp}));
+  fd.feedback.forEach(f=>items.push({type:'feedback',rating:f.rating,message:f.message,timestamp:f.created_at}));
+  items.sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+  const me=document.getElementById('chatMessages');let h='',ld='';
+  items.forEach(item=>{const dt=new Date(item.timestamp);const ds=dt.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'});if(ds!==ld){h+=`<div class="msg-date-sep"><span>${ds}</span></div>`;ld=ds}
+  const ts=dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+  if(item.type==='feedback'){
+    const stars=item.rating?'★'.repeat(item.rating)+'☆'.repeat(5-item.rating):'';
+    h+=`<div class="msg feedback"><div class="fb-label">⭐ FEEDBACK</div>${stars?`<div class="fb-stars">${stars}</div>`:''}${item.message?`<div>${esc(item.message)}</div>`:''}<div class="msg-time">${ts}</div></div>`;
+  }else{
+    const cls=item.author==='user'?'user':'root_agent';h+=`<div class="msg ${cls}">${esc(item.text)}<div class="msg-time">${ts}</div></div>`;
+  }});
   me.innerHTML=h||'<div style="padding:40px;text-align:center;color:var(--t2)">No messages</div>';me.scrollTop=me.scrollHeight}catch(e){console.error(e)}
 }
 
