@@ -248,11 +248,10 @@ async def delete_conversation(session_id: str, token: str | None = Cookie(None))
     async with db_pool.acquire() as conn:
         async with conn.transaction():
             ev_count = await conn.fetchval(
-                "DELETE FROM events WHERE session_id = $1 RETURNING 1", session_id
+                "SELECT COUNT(*) FROM events WHERE session_id = $1", session_id
             )
-            await conn.execute(
-                "DELETE FROM sessions WHERE session_id = $1", session_id
-            )
+            await conn.execute("DELETE FROM events WHERE session_id = $1", session_id)
+            await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
     return {"ok": True, "deleted_events": ev_count or 0}
 
 
