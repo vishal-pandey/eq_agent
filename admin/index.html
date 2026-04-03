@@ -243,7 +243,7 @@ function renderConvList(list){
 }
 async function openChat(sid){
   activeSession=sid;renderConvList(filterConvs());const conv=conversations.find(c=>c.session_id===sid);const area=document.getElementById('mainContent');
-  area.innerHTML=`<div class="chat-header"><div class="conv-avatar">${(conv?.user_id||'?').substring(0,2).toUpperCase()}</div><div class="chat-header-info"><div class="chat-header-name">${esc(conv?.user_id||sid)}</div><div class="chat-header-sub">Session: ${sid}</div></div></div><div class="chat-messages" id="chatMessages"><div style="padding:40px;text-align:center;color:var(--t2)">Loading…</div></div>`;
+  area.innerHTML=`<div class="chat-header"><div class="conv-avatar">${(conv?.user_id||'?').substring(0,2).toUpperCase()}</div><div class="chat-header-info"><div class="chat-header-name">${esc(conv?.user_id||sid)}</div><div class="chat-header-sub">Session: ${sid}</div></div><button onclick="deleteConversation('${sid}')" style="margin-left:auto;background:none;border:1px solid #ef4444;color:#ef4444;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:.78em">Delete</button></div><div class="chat-messages" id="chatMessages"><div style="padding:40px;text-align:center;color:var(--t2)">Loading…</div></div>`;
   try{const r=await fetch(`/api/conversations/${sid}`);if(r.status===401){location.reload();return}const d=await r.json();const me=document.getElementById('chatMessages');let h='',ld='';
   d.messages.forEach(m=>{const dt=new Date(m.timestamp);const ds=dt.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'});if(ds!==ld){h+=`<div class="msg-date-sep"><span>${ds}</span></div>`;ld=ds}
   const ts=dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});const cls=m.author==='user'?'user':'root_agent';h+=`<div class="msg ${cls}">${esc(m.text)}<div class="msg-time">${ts}</div></div>`});
@@ -252,6 +252,13 @@ async function openChat(sid){
 
 // ============ Helpers ============
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+
+async function deleteConversation(sid){
+  if(!confirm('Delete this conversation? This removes all messages and the session permanently.'))return;
+  try{const r=await fetch(`/api/conversations/${sid}`,{method:'DELETE'});if(r.status===401){location.reload();return}
+  if(r.ok){activeSession=null;renderEmptyChat();loadConversations()}
+  else{alert('Failed to delete conversation')}}catch(e){alert('Error: '+e)}
+}
 function relTime(iso){const d=new Date(iso),now=new Date(),diff=now-d,mins=Math.floor(diff/60000);if(mins<1)return'now';if(mins<60)return mins+'m';const hrs=Math.floor(mins/60);if(hrs<24)return hrs+'h';const days=Math.floor(hrs/24);if(days<7)return days+'d';return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}
 function fmtDate(iso){return new Date(iso).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 
