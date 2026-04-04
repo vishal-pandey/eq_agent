@@ -117,7 +117,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         parts=[types.Part(text=request.message)],
     )
 
-    response_text = ""
+    response_parts: list[str] = []
     try:
         async with Aclosing(
             runner.run_async(
@@ -128,11 +128,15 @@ async def chat(request: ChatRequest) -> ChatResponse:
         ) as events:
             async for event in events:
                 if event.is_final_response() and event.content and event.content.parts:
-                    response_text = "".join(
+                    text = "".join(
                         part.text for part in event.content.parts if part.text
                     )
+                    if text.strip():
+                        response_parts.append(text.strip())
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    response_text = "\n\n".join(response_parts)
 
     return ChatResponse(
         response=response_text,
