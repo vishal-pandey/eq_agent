@@ -291,47 +291,6 @@ if asked.
 """
 
 
-def _load_config_from_db() -> tuple[str, str]:
-    """Synchronously load latest agent config from DB. Falls back to defaults."""
-    import asyncio
-    import asyncpg as _apg
-
-    db_url = os.environ.get("DATABASE_URL", "")
-    if not db_url:
-        return DEFAULT_DESCRIPTION, DEFAULT_INSTRUCTION
-    if "+asyncpg" in db_url:
-        db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-
-    async def _fetch():
-        try:
-            conn = await _apg.connect(db_url)
-            row = await conn.fetchrow(
-                "SELECT description, instruction FROM agent_config "
-                "WHERE is_active = true ORDER BY version DESC LIMIT 1"
-            )
-            await conn.close()
-            if row:
-                return row["description"], row["instruction"]
-        except Exception as e:
-            print(f"⚠️  Could not load agent config from DB: {e}")
-        return None
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            result = None
-        else:
-            result = loop.run_until_complete(_fetch())
-    except RuntimeError:
-        result = asyncio.run(_fetch())
-
-    if result:
-        print("✅ Loaded agent config from database")
-        return result
-    print("ℹ️  Using default agent config (no DB config found)")
-    return DEFAULT_DESCRIPTION, DEFAULT_INSTRUCTION
-
-
 # ---------------------------------------------------------------------------
 # Dynamic instruction provider — reloads from DB every 60s
 # ---------------------------------------------------------------------------
@@ -346,6 +305,8 @@ async def _refresh_config_cache():
     """Fetch active config from DB and update cache."""
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
+        # No DB configured — stamp the cache so we don't retry every request
+        _config_cache["ts"] = _time.time()
         return
     if "+asyncpg" in db_url:
         db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
@@ -359,12 +320,14 @@ async def _refresh_config_cache():
         if row:
             _config_cache["instruction"] = row["instruction"]
             _config_cache["description"] = row["description"]
+            _config_cache["ts"] = _time.time()
             print(f"✅ Refreshed agent config from DB (len={len(row['instruction'])})")
         else:
+            # No active row — don't update ts so we retry sooner
             print("⚠️  No active agent_config row found in DB")
     except Exception as exc:
+        # Don't update ts on failure — retry on next request
         print(f"⚠️  Failed to refresh agent config: {exc}")
-    _config_cache["ts"] = _time.time()
 
 
 async def _dynamic_instruction(ctx) -> str:
@@ -396,10 +359,7 @@ and the GIP will silently break. ALWAYS schedule the next step.
     return f"Current date and time: {now}\n\nYou are: {desc}\n\n{instr}{tool_reminder}"
 
 
-# Initial load: seed cache with defaults, force refresh on first request
-_description, _instruction = _load_config_from_db()
-_config_cache["instruction"] = _instruction
-_config_cache["description"] = _description
+# Initial cache uses hardcoded defaults; first request triggers async DB refresh
 _config_cache["ts"] = 0  # force refresh on first request
 
 root_agent = Agent(
