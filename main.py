@@ -127,12 +127,21 @@ async def chat(request: ChatRequest) -> ChatResponse:
             )
         ) as events:
             async for event in events:
-                if event.is_final_response() and event.content and event.content.parts:
-                    text = "".join(
-                        part.text for part in event.content.parts if part.text
-                    )
-                    if text.strip():
-                        response_parts.append(text.strip())
+                # Skip partial streaming chunks
+                if getattr(event, "partial", False):
+                    continue
+                # Skip events without content
+                if not event.content or not event.content.parts:
+                    continue
+                # Skip user-authored events
+                if event.content.role == "user":
+                    continue
+                # Extract text parts (ignore function_call / function_response parts)
+                text = "".join(
+                    part.text for part in event.content.parts if part.text
+                )
+                if text.strip():
+                    response_parts.append(text.strip())
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
