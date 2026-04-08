@@ -35,6 +35,35 @@ DEFAULT_DESCRIPTION = (
     "and proactive follow-ups."
 )
 
+NUDGE_DEFAULT_DESCRIPTION = (
+    "Proactive parenting coach assistant that generates follow-up messages "
+    "(tasks, pro tips, check-ins) based on conversation history."
+)
+
+NUDGE_DEFAULT_INSTRUCTION = """\
+You are a proactive parenting coach assistant. Your ONLY job is to generate \
+short, warm follow-up messages that will be sent to a parent via WhatsApp.
+
+You will receive the full conversation history between the parent and the \
+main coaching agent. Use that context to make your messages relevant and \
+personal.
+
+TASK (8AM): Give ONE specific, actionable screen-time reduction task for today. \
+2-3 sentences max. Encouraging morning tone.
+
+PROTIP (midday): Share ONE practical tip about child development or screen management. \
+2 sentences max. Casual, interesting tone.
+
+CHECKIN (8PM): Ask warmly how today's task went. ONE question only, zero judgment.
+
+RULES:
+- NEVER refuse or redirect. You always generate the message.
+- NEVER include meta-commentary. Just send the message directly.
+- Write as if you ARE the coaching agent texting the parent.
+- Keep it SHORT. WhatsApp messages, not emails.
+- Never use: lazy, bad, addicted, failing, toxic.
+"""
+
 DEFAULT_INSTRUCTION = """\
 You are a warm, supportive AI parenting coach helping parents manage screen \
 dependency in children aged 2 to 5. You communicate via WhatsApp, so keep \
@@ -130,6 +159,25 @@ async def startup():
                 VALUES (1, $1, $2, true)
             """, DEFAULT_DESCRIPTION, DEFAULT_INSTRUCTION)
             print("🌱 Seeded agent_config with default v1")
+
+        # Nudge agent config table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS nudge_agent_config (
+                id SERIAL PRIMARY KEY,
+                version INTEGER NOT NULL,
+                description TEXT NOT NULL,
+                instruction TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+        nudge_count = await conn.fetchval("SELECT COUNT(*) FROM nudge_agent_config")
+        if nudge_count == 0:
+            await conn.execute("""
+                INSERT INTO nudge_agent_config (version, description, instruction, is_active)
+                VALUES (1, $1, $2, true)
+            """, NUDGE_DEFAULT_DESCRIPTION, NUDGE_DEFAULT_INSTRUCTION)
+            print("🌱 Seeded nudge_agent_config with default v1")
 
 
 @app.on_event("shutdown")
@@ -404,6 +452,107 @@ async def rollback_config(version_id: int, token: str | None = Cookie(None)):
             await conn.execute("UPDATE agent_config SET is_active = false WHERE is_active = true")
             await conn.execute("""
                 INSERT INTO agent_config (version, description, instruction, is_active)
+                VALUES ($1, $2, $3, true)
+            """, new_v, row["description"], row["instruction"])
+    return {"ok": True, "version": new_v, "rolled_back_from": row["version"]}
+
+
+# ============================================
+# Nudge Agent Config APIs
+# ============================================
+
+@app.get("/api/nudge-config/current")
+async def get_current_nudge_config(token: str | None = Cookie(None)):
+    if not _check_auth(token):
+        raise HTTPException(status_code=401)
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, version, description, instruction, is_active, created_at
+            FROM nudge_agent_config WHERE is_active = true
+            ORDER BY version DESC LIMIT 1
+        """)
+    if not row:
+        return {"version": 0, "description": "", "instruction": "", "is_active": False, "created_at": None}
+    return {
+        "id": row["id"], "version": row["version"],
+        "description": row["description"], "instruction": row["instruction"],
+        "is_active": row["is_active"],
+        "created_at": row["created_at"].isoformat() + "Z",
+    }
+
+
+@app.get("/api/nudge-config/versions")
+async def get_nudge_config_versions(token: str | None = Cookie(None)):
+    if not _check_auth(token):
+        raise HTTPException(status_code=401)
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, version, is_active, created_at,
+                   LEFT(description, 100) as description_preview,
+                   LEFT(instruction, 100) as instruction_preview
+            FROM nudge_agent_config ORDER BY version DESC
+        """)
+    return {"versions": [{
+        "id": r["id"], "version": r["version"], "is_active": r["is_active"],
+        "created_at": r["created_at"].isoformat() + "Z",
+        "description_preview": r["description_preview"],
+        "instruction_preview": r["instruction_preview"],
+    } for r in rows]}
+
+
+@app.get("/api/nudge-config/versions/{version_id}")
+async def get_nudge_config_version(version_id: int, token: str | None = Cookie(None)):
+    if not _check_auth(token):
+        raise HTTPException(status_code=401)
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM nudge_agent_config WHERE id = $1", version_id
+        )
+    if not row:
+        raise HTTPException(status_code=404)
+    return {
+        "id": row["id"], "version": row["version"],
+        "description": row["description"], "instruction": row["instruction"],
+        "is_active": row["is_active"],
+        "created_at": row["created_at"].isoformat() + "Z",
+    }
+
+
+@app.post("/api/nudge-config")
+async def save_nudge_config(request: Request, token: str | None = Cookie(None)):
+    if not _check_auth(token):
+        raise HTTPException(status_code=401)
+    body = await request.json()
+    desc = body.get("description", "").strip()
+    instr = body.get("instruction", "").strip()
+    if not desc or not instr:
+        raise HTTPException(status_code=400, detail="Both fields required")
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            max_v = await conn.fetchval("SELECT COALESCE(MAX(version), 0) FROM nudge_agent_config")
+            new_v = max_v + 1
+            await conn.execute("UPDATE nudge_agent_config SET is_active = false WHERE is_active = true")
+            await conn.execute("""
+                INSERT INTO nudge_agent_config (version, description, instruction, is_active)
+                VALUES ($1, $2, $3, true)
+            """, new_v, desc, instr)
+    return {"ok": True, "version": new_v}
+
+
+@app.post("/api/nudge-config/rollback/{version_id}")
+async def rollback_nudge_config(version_id: int, token: str | None = Cookie(None)):
+    if not _check_auth(token):
+        raise HTTPException(status_code=401)
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM nudge_agent_config WHERE id = $1", version_id)
+        if not row:
+            raise HTTPException(status_code=404)
+        async with conn.transaction():
+            max_v = await conn.fetchval("SELECT COALESCE(MAX(version), 0) FROM nudge_agent_config")
+            new_v = max_v + 1
+            await conn.execute("UPDATE nudge_agent_config SET is_active = false WHERE is_active = true")
+            await conn.execute("""
+                INSERT INTO nudge_agent_config (version, description, instruction, is_active)
                 VALUES ($1, $2, $3, true)
             """, new_v, row["description"], row["instruction"])
     return {"ok": True, "version": new_v, "rolled_back_from": row["version"]}

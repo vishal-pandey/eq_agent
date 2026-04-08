@@ -16,6 +16,7 @@ from temporalio.client import Client as TemporalClient
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "eq_helper", ".env"))
 
 from eq_helper.agent import root_agent  # noqa: E402 — must load after env
+from eq_helper.nudge_agent import nudge_agent  # noqa: E402
 from temporal.models import FollowupCycleInput  # noqa: E402
 
 APP_NAME = "eq_helper"
@@ -385,7 +386,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
 
     temp_runner = Runner(
         app_name=APP_NAME,
-        agent=root_agent,
+        agent=nudge_agent,
         session_service=temp_service,
     )
 

@@ -217,14 +217,15 @@ document.getElementById('loginUser').addEventListener('keydown',e=>{if(e.key==='
 function switchTab(tab){
   currentTab=tab;activeSession=null;
   if(tab==='chats'){renderChatSidebar();renderEmptyChat();loadConversations()}
-  else{renderSettingsSidebar();renderSettingsPanel()}
+  else if(tab==='settings'){renderSettingsSidebar();renderSettingsPanel()}
+  else if(tab==='nudge'){renderNudgeSidebar();renderNudgePanel()}
 }
 
 // ============ Chat sidebar ============
 function renderChatSidebar(){
   document.getElementById('sidebar').innerHTML=`
     <div class="sidebar-header"><div><h3>EQ Helper Admin</h3><div class="stats" id="statsLine">Loading…</div></div>
-    <div class="hdr-btns"><button class="tab-btn active" onclick="switchTab('chats')">Chats</button><button class="tab-btn" onclick="switchTab('settings')">Settings</button><button class="logout-btn" onclick="doLogout()">Logout</button></div></div>
+    <div class="hdr-btns"><button class="tab-btn active" onclick="switchTab('chats')">Chats</button><button class="tab-btn" onclick="switchTab('settings')">Agent</button><button class="tab-btn" onclick="switchTab('nudge')">Nudge</button><button class="logout-btn" onclick="doLogout()">Logout</button></div></div>
     <div class="search-box"><input type="text" id="searchInput" placeholder="Search conversations…" oninput="renderConvList(filterConvs())"></div>
     <div class="conv-list" id="convList"></div>`;
 }
@@ -285,7 +286,7 @@ setInterval(()=>{if(currentTab==='chats')loadConversations()},30000);
 function renderSettingsSidebar(){
   document.getElementById('sidebar').innerHTML=`
     <div class="sidebar-header"><div><h3>Agent Config</h3><div class="stats">Version history</div></div>
-    <div class="hdr-btns"><button class="tab-btn" onclick="switchTab('chats')">Chats</button><button class="tab-btn active" onclick="switchTab('settings')">Settings</button><button class="logout-btn" onclick="doLogout()">Logout</button></div></div>
+    <div class="hdr-btns"><button class="tab-btn" onclick="switchTab('chats')">Chats</button><button class="tab-btn active" onclick="switchTab('settings')">Agent</button><button class="tab-btn" onclick="switchTab('nudge')">Nudge</button><button class="logout-btn" onclick="doLogout()">Logout</button></div></div>
     <div class="conv-list" id="versionList"><div style="padding:40px;text-align:center;color:var(--t2)">Loading…</div></div>`;
   loadVersions();
 }
@@ -419,6 +420,86 @@ function renderDiffHtml(diff){
     const prefix=d.type==='add'?'+ ':d.type==='del'?'- ':'  ';
     return`<div class="diff-line ${d.type}">${esc(prefix+d.text)}</div>`
   }).join('');
+}
+
+// ============ Nudge Agent Settings ============
+let nudgeVersions=[];
+
+function renderNudgeSidebar(){
+  document.getElementById('sidebar').innerHTML=`
+    <div class="sidebar-header"><div><h3>Nudge Agent Config</h3><div class="stats">Version history</div></div>
+    <div class="hdr-btns"><button class="tab-btn" onclick="switchTab('chats')">Chats</button><button class="tab-btn" onclick="switchTab('settings')">Agent</button><button class="tab-btn active" onclick="switchTab('nudge')">Nudge</button><button class="logout-btn" onclick="doLogout()">Logout</button></div></div>
+    <div class="conv-list" id="nudgeVersionList"><div style="padding:40px;text-align:center;color:var(--t2)">Loading…</div></div>`;
+  loadNudgeVersions();
+}
+
+async function loadNudgeVersions(){
+  try{const r=await fetch('/api/nudge-config/versions');if(r.status===401){location.reload();return}
+  const d=await r.json();nudgeVersions=d.versions;renderNudgeVersionList()}catch(e){console.error(e)}
+}
+
+function renderNudgeVersionList(){
+  const el=document.getElementById('nudgeVersionList');if(!el)return;
+  if(!nudgeVersions.length){el.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2)">No versions yet. Save your first config.</div>';return}
+  el.innerHTML=nudgeVersions.map(v=>`
+    <div class="ver-item${v.is_active?' active-ver':''}" onclick="viewNudgeVersion(${v.id})">
+      <div class="ver-top"><span class="ver-num">v${v.version}</span>${v.is_active?'<span class="ver-badge">ACTIVE</span>':''}</div>
+      <div class="ver-date">${fmtDate(v.created_at)}</div>
+      <div class="ver-preview">${esc((v.description_preview||'').substring(0,80))}</div>
+      <div class="ver-actions">
+        ${v.is_active?'':'<button class="ver-btn rollback" onclick="event.stopPropagation();doNudgeRollback('+v.id+','+v.version+')">Rollback</button>'}
+      </div>
+    </div>`).join('');
+}
+
+async function viewNudgeVersion(id){
+  try{const r=await fetch(`/api/nudge-config/versions/${id}`);if(!r.ok)return;const d=await r.json();
+  renderNudgePanel(d)}catch(e){console.error(e)}
+}
+
+async function doNudgeRollback(id,ver){
+  if(!confirm(`Rollback nudge config to v${ver}?`))return;
+  try{const r=await fetch(`/api/nudge-config/rollback/${id}`,{method:'POST'});if(r.status===401){location.reload();return}
+  const d=await r.json();if(d.ok){loadNudgeVersions();renderNudgePanel()}}catch(e){alert('Rollback failed: '+e)}
+}
+
+async function renderNudgePanel(prefill){
+  let cfg=prefill;
+  if(!cfg){try{const r=await fetch('/api/nudge-config/current');if(r.ok)cfg=await r.json()}catch(e){}}
+  const desc=cfg?.description||'';const instr=cfg?.instruction||'';const ver=cfg?.version||0;
+  const isView=prefill&&!prefill.is_active;
+
+  document.getElementById('mainContent').innerHTML=`
+    <div class="settings-panel">
+      <div class="settings-header">
+        <h3>${isView?'Viewing v'+prefill.version:'Edit Nudge Agent Config'} ${ver?' (current: v'+ver+')':' (no config saved yet)'}</h3>
+        ${isView?'<button class="tab-btn" onclick="renderNudgePanel()">← Back to Editor</button>':''}
+      </div>
+      <div class="settings-body">
+        <div class="field-label">Description <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
+        <div class="editor-wrap"><div id="descEditor"></div></div>
+        <div class="field-label" style="margin-top:20px">Instruction <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
+        <div class="editor-wrap" style="min-height:300px"><div id="instrEditor"></div></div>
+        ${isView?'':'<div style="margin-top:20px"><button class="save-btn" id="nudgeSaveBtn" onclick="saveNudgeConfig()">Save New Version</button><span class="save-msg" id="nudgeSaveMsg"></span></div>'}
+        <div style="height:40px"></div>
+      </div>
+    </div>`;
+
+  if(window._mkInit){await window._mkInit(desc,instr)}
+}
+
+async function saveNudgeConfig(){
+  const desc=window._mkGetDesc?window._mkGetDesc():'';
+  const instr=window._mkGetInstr?window._mkGetInstr():'';
+  const btn=document.getElementById('nudgeSaveBtn');const msg=document.getElementById('nudgeSaveMsg');
+  if(!desc.trim()||!instr.trim()){msg.className='save-msg err';msg.textContent='Both fields are required';return}
+  btn.disabled=true;msg.className='save-msg';msg.textContent='Saving…';
+  try{const r=await fetch('/api/nudge-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc,instruction:instr})});
+  if(r.status===401){location.reload();return}const d=await r.json();
+  if(d.ok){msg.className='save-msg ok';msg.textContent=`Saved as v${d.version}!`;loadNudgeVersions()}
+  else{msg.className='save-msg err';msg.textContent='Save failed'}}
+  catch(e){msg.className='save-msg err';msg.textContent='Error: '+e}
+  finally{btn.disabled=false}
 }
 
 // ============ Init ============
