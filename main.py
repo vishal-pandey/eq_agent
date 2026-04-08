@@ -334,11 +334,11 @@ async def check_activity(session_id: str, user_id: Optional[str] = "default_user
 _GENERATE_PROMPTS = {
     "task": (
         "It is 8AM. Based on what you know about this parent's situation, "
-        "generate today's screen-time reduction task. Keep it short, specific, "
+        "generate today's task. Keep it short, specific, "
         "and actionable. Do not ask questions — just give the task warmly."
     ),
     "protip": (
-        "Share one quick, practical pro tip about managing screen time or child "
+        "Share one quick, practical pro tip about the problem or child "
         "development that's relevant to this parent's situation. "
         "2 sentences max. Friendly text tone, not a lecture."
     ),
