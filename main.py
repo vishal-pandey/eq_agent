@@ -333,47 +333,73 @@ async def check_activity(session_id: str, user_id: Optional[str] = "default_user
 
 _GENERATE_PROMPTS = {
     "task": (
-        "[SYSTEM] It is 8AM. Generate today's screen-time reduction task for the parent. "
-        "Keep it short, specific, and actionable. Do not ask questions — just give the task."
+        "It is 8AM. Based on what you know about this parent's situation, "
+        "generate today's screen-time reduction task. Keep it short, specific, "
+        "and actionable. Do not ask questions — just give the task warmly."
     ),
     "protip": (
-        "[SYSTEM] Share one quick, practical pro tip about managing screen time or child development. "
-        "Keep it to 2 sentences max. Make it feel like a friendly text, not a lecture."
+        "Share one quick, practical pro tip about managing screen time or child "
+        "development that's relevant to this parent's situation. "
+        "2 sentences max. Friendly text tone, not a lecture."
     ),
     "checkin": (
-        "[SYSTEM] It is 8PM. Check in with the parent about today's task. "
-        "Ask warmly if they managed to try it and how it went. One question only."
+        "It is 8PM. Check in warmly about today's task — ask if they managed to "
+        "try it and how it went. One question only."
     ),
 }
 
 
 @app.post("/generate", response_model=GenerateResponse)
 async def generate(request: GenerateRequest) -> GenerateResponse:
-    """Inject a system prompt into the session and get the agent's generated message.
+    """Generate a follow-up message using the session's conversation history.
 
-    n8n calls this after deciding a nudge should be sent. The response text
-    should then be forwarded to the user via WhatsApp.
+    Runs the agent against a temporary session that mirrors the real session's
+    history, so the nudge prompt is never persisted to the actual conversation.
+    n8n should call /inject after sending the response to keep history coherent.
     """
-    uid = request.user_id or "default_user"
-    system_prompt = _GENERATE_PROMPTS[request.category]
+    from google.adk.sessions import InMemorySessionService
+    import copy
 
-    session = await session_service.get_session(
+    uid = request.user_id or "default_user"
+    nudge = _GENERATE_PROMPTS[request.category]
+
+    # Load the real session to get conversation history + state
+    real_session = await session_service.get_session(
         app_name=APP_NAME, user_id=uid, session_id=request.session_id
     )
-    if not session:
+    if not real_session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Create a throw-away in-memory session with the same history and state
+    temp_service = InMemorySessionService()
+    temp_session_id = f"tmp-{uuid.uuid4().hex}"
+    temp_session = await temp_service.create_session(
+        app_name=APP_NAME,
+        user_id=uid,
+        session_id=temp_session_id,
+        state=copy.deepcopy(dict(real_session.state or {})),
+    )
+    # Copy real conversation events into the temp session
+    for event in (real_session.events or []):
+        await temp_service.append_event(session=temp_session, event=event)
+
+    temp_runner = Runner(
+        app_name=APP_NAME,
+        agent=root_agent,
+        session_service=temp_service,
+    )
 
     content = types.Content(
         role="user",
-        parts=[types.Part(text=system_prompt)],
+        parts=[types.Part(text=nudge)],
     )
 
     response_parts: list[str] = []
     try:
         async with Aclosing(
-            runner.run_async(
+            temp_runner.run_async(
                 user_id=uid,
-                session_id=request.session_id,
+                session_id=temp_session_id,
                 new_message=content,
             )
         ) as events:
@@ -389,9 +415,25 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
                     response_parts.append(text.strip())
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        await temp_runner.close()
+
+    response_text = "\n\n".join(response_parts)
+
+    # Inject the generated response into the real session so history stays coherent
+    if response_text.strip():
+        inject_event = Event(
+            invocation_id=str(uuid.uuid4()),
+            author="root_agent",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text=response_text)],
+            ),
+        )
+        await session_service.append_event(session=real_session, event=inject_event)
 
     return GenerateResponse(
-        response="\n\n".join(response_parts),
+        response=response_text,
         session_id=request.session_id,
     )
 

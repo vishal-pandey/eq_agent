@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from temporal.activities import execute_http_request
@@ -47,37 +48,41 @@ class FollowupCycleWorkflow:
         (20, "checkin", False),
     ]
 
+    def _next_slot(self) -> tuple[int, str, bool] | None:
+        """Find the next slot that hasn't passed yet today (IST).
+
+        Returns None if all slots are done for today.
+        """
+        now_ist = _ist_now()
+        current_minutes = now_ist.hour * 60 + now_ist.minute
+        for hour, category, check_activity in self._SLOTS:
+            # Use minute-level comparison: slot is still upcoming if its
+            # start minute is strictly in the future
+            if hour * 60 > current_minutes:
+                return (hour, category, check_activity)
+        return None
+
     @workflow.run
     async def run(self, inp: FollowupCycleInput) -> None:
         while True:
-            now_ist = _ist_now()
-            current_hour = now_ist.hour
+            slot = self._next_slot()
 
-            # Find the next slot that hasn't fired yet today
-            next_slot = None
-            for hour, category, check_activity in self._SLOTS:
-                if hour > current_hour:
-                    next_slot = (hour, category, check_activity)
-                    break
-
-            if next_slot is None:
+            if slot is None:
                 # All slots done today — sleep until 8AM tomorrow
                 delay = _seconds_until_ist_time(8)
-            else:
-                hour, category, check_activity = next_slot
-                delay = _seconds_until_ist_time(hour)
-
-            workflow.logger.info(
-                f"[{inp.session_id}] Next slot in {delay:.0f}s "
-                f"({next_slot[1] if next_slot else 'task (tomorrow)'})"
-            )
-            await asyncio.sleep(delay)
-
-            if next_slot is None:
-                # Woke up for 8AM — loop back to pick it up
+                workflow.logger.info(
+                    f"[{inp.session_id}] All slots done, sleeping {delay:.0f}s until 8AM tomorrow"
+                )
+                await asyncio.sleep(delay)
                 continue
 
-            hour, category, check_activity = next_slot
+            hour, category, check_activity = slot
+            delay = _seconds_until_ist_time(hour)
+
+            workflow.logger.info(
+                f"[{inp.session_id}] Next: '{category}' at {hour}:00 IST in {delay:.0f}s"
+            )
+            await asyncio.sleep(delay)
 
             payload = json.dumps({
                 "session_id": inp.session_id,
@@ -100,7 +105,7 @@ class FollowupCycleWorkflow:
                     execute_http_request,
                     task,
                     start_to_close_timeout=timedelta(seconds=40),
-                    retry_policy=workflow.RetryPolicy(maximum_attempts=3),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
                 )
                 workflow.logger.info(
                     f"[{inp.session_id}] Fired '{category}' nudge"
@@ -110,8 +115,8 @@ class FollowupCycleWorkflow:
                     f"[{inp.session_id}] Failed to fire '{category}': {exc}"
                 )
 
-            # Small buffer so we don't re-fire the same slot
-            await asyncio.sleep(60)
+            # Buffer past this slot so _next_slot() advances to the next one
+            await asyncio.sleep(120)
 
 
 @workflow.defn
