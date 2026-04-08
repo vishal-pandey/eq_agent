@@ -3,6 +3,15 @@ from typing import Optional
 
 
 @dataclass
+class FollowupCycleInput:
+    """Input for starting a recurring follow-up cycle for a user session."""
+
+    session_id: str
+    user_id: str
+    webhook_url: str  # n8n webhook URL
+
+
+@dataclass
 class ScheduledHttpTask:
     """Input for scheduling an HTTP request at a future time."""
 

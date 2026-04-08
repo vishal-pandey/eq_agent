@@ -5,7 +5,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from temporal.activities import execute_http_request
-from temporal.workflows import ScheduledHttpTaskWorkflow
+from temporal.workflows import FollowupCycleWorkflow, ScheduledHttpTaskWorkflow
 
 TEMPORAL_HOST = os.environ.get("TEMPORAL_HOST", "localhost:7233")
 TASK_QUEUE = "scheduled-http-tasks"
@@ -17,7 +17,7 @@ async def main():
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[ScheduledHttpTaskWorkflow],
+        workflows=[ScheduledHttpTaskWorkflow, FollowupCycleWorkflow],
         activities=[execute_http_request],
     )
 

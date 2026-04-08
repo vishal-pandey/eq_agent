@@ -1,7 +1,8 @@
 import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -10,12 +11,26 @@ from google.adk.runners import Runner
 from google.adk.utils.context_utils import Aclosing
 from google.genai import types
 from pydantic import BaseModel
+from temporalio.client import Client as TemporalClient
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "eq_helper", ".env"))
 
 from eq_helper.agent import root_agent  # noqa: E402 — must load after env
+from temporal.models import FollowupCycleInput  # noqa: E402
 
 APP_NAME = "eq_helper"
+TEMPORAL_HOST = os.environ.get("TEMPORAL_HOST", "localhost:7233")
+N8N_FOLLOWUP_WEBHOOK_URL = os.environ.get("N8N_FOLLOWUP_WEBHOOK_URL", "")
+TASK_QUEUE = "scheduled-http-tasks"
+
+_temporal_client: TemporalClient | None = None
+
+
+async def _get_temporal_client() -> TemporalClient:
+    global _temporal_client
+    if _temporal_client is None:
+        _temporal_client = await TemporalClient.connect(TEMPORAL_HOST)
+    return _temporal_client
 
 # ---------------------------------------------------------------------------
 # Session storage: PostgreSQL if DATABASE_URL is set, else in-memory
@@ -111,6 +126,22 @@ async def chat(request: ChatRequest) -> ChatResponse:
             session_id=session_id,
             state={"_session_id": session_id, "_user_id": user_id},
         )
+        # Kick off the fixed-time follow-up cycle for this new session
+        if N8N_FOLLOWUP_WEBHOOK_URL:
+            try:
+                client = await _get_temporal_client()
+                await client.start_workflow(
+                    "FollowupCycleWorkflow",
+                    FollowupCycleInput(
+                        session_id=session_id,
+                        user_id=user_id,
+                        webhook_url=N8N_FOLLOWUP_WEBHOOK_URL,
+                    ),
+                    id=f"cycle-{session_id}",
+                    task_queue=TASK_QUEUE,
+                )
+            except Exception:
+                pass  # Don't fail the chat request if cycle scheduling fails
 
     content = types.Content(
         role="user",
@@ -190,6 +221,179 @@ async def inject(request: InjectRequest) -> InjectResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return InjectResponse(status="ok", session_id=request.session_id)
+
+
+class GenerateRequest(BaseModel):
+    session_id: str
+    user_id: Optional[str] = "default_user"
+    category: Literal["task", "protip", "checkin"]
+
+
+class GenerateResponse(BaseModel):
+    response: str
+    session_id: str
+
+
+class ActivityResponse(BaseModel):
+    session_id: str
+    active: bool  # True if user messaged in last 2.5 hours
+
+
+# ---------------------------------------------------------------------------
+# /start-cycle — launch the recurring follow-up cycle for a session
+# ---------------------------------------------------------------------------
+
+@app.post("/start-cycle")
+async def start_cycle(session_id: str, user_id: Optional[str] = "default_user") -> dict:
+    """Start the fixed-time follow-up cycle (8AM task, 3-hourly protips, 8PM checkin IST).
+
+    Call this once when a new conversation is created. Safe to call again —
+    if a cycle is already running for this session it will be a no-op.
+    """
+    if not N8N_FOLLOWUP_WEBHOOK_URL:
+        raise HTTPException(status_code=500, detail="N8N_FOLLOWUP_WEBHOOK_URL not configured")
+
+    workflow_id = f"cycle-{session_id}"
+    try:
+        client = await _get_temporal_client()
+        await client.start_workflow(
+            "FollowupCycleWorkflow",
+            FollowupCycleInput(
+                session_id=session_id,
+                user_id=user_id or "default_user",
+                webhook_url=N8N_FOLLOWUP_WEBHOOK_URL,
+            ),
+            id=workflow_id,
+            task_queue=TASK_QUEUE,
+        )
+    except Exception as exc:
+        # AlreadyExistsError means cycle is already running — that's fine
+        if "already exists" in str(exc).lower():
+            return {"status": "already_running", "workflow_id": workflow_id}
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"status": "started", "workflow_id": workflow_id}
+
+
+# ---------------------------------------------------------------------------
+# /activity/{session_id} — check if user was active in last 2.5 hours
+# ---------------------------------------------------------------------------
+
+@app.get("/activity/{session_id}", response_model=ActivityResponse)
+async def check_activity(session_id: str, user_id: Optional[str] = "default_user") -> ActivityResponse:
+    """Return whether the user sent a message in the last 2.5 hours.
+
+    n8n calls this before sending a protip nudge — if active=true, skip the nudge.
+    """
+    uid = user_id or "default_user"
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2, minutes=30)
+
+    try:
+        session = await session_service.get_session(
+            app_name=APP_NAME, user_id=uid, session_id=session_id
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        active = False
+        for event in reversed(session.events or []):
+            ts = getattr(event, "timestamp", None)
+            if ts is None:
+                continue
+            # timestamp may be a float (unix) or datetime
+            if isinstance(ts, (int, float)):
+                event_dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            else:
+                event_dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+            if event_dt < cutoff:
+                break  # events are ordered; no need to go further back
+
+            # Check if this is a user-authored event with text
+            if (
+                event.content
+                and event.content.role == "user"
+                and event.content.parts
+                and any(p.text for p in event.content.parts if p.text)
+            ):
+                active = True
+                break
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return ActivityResponse(session_id=session_id, active=active)
+
+
+# ---------------------------------------------------------------------------
+# /generate — ask the agent to produce a follow-up message for a session
+# ---------------------------------------------------------------------------
+
+_GENERATE_PROMPTS = {
+    "task": (
+        "[SYSTEM] It is 8AM. Generate today's screen-time reduction task for the parent. "
+        "Keep it short, specific, and actionable. Do not ask questions — just give the task."
+    ),
+    "protip": (
+        "[SYSTEM] Share one quick, practical pro tip about managing screen time or child development. "
+        "Keep it to 2 sentences max. Make it feel like a friendly text, not a lecture."
+    ),
+    "checkin": (
+        "[SYSTEM] It is 8PM. Check in with the parent about today's task. "
+        "Ask warmly if they managed to try it and how it went. One question only."
+    ),
+}
+
+
+@app.post("/generate", response_model=GenerateResponse)
+async def generate(request: GenerateRequest) -> GenerateResponse:
+    """Inject a system prompt into the session and get the agent's generated message.
+
+    n8n calls this after deciding a nudge should be sent. The response text
+    should then be forwarded to the user via WhatsApp.
+    """
+    uid = request.user_id or "default_user"
+    system_prompt = _GENERATE_PROMPTS[request.category]
+
+    session = await session_service.get_session(
+        app_name=APP_NAME, user_id=uid, session_id=request.session_id
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    content = types.Content(
+        role="user",
+        parts=[types.Part(text=system_prompt)],
+    )
+
+    response_parts: list[str] = []
+    try:
+        async with Aclosing(
+            runner.run_async(
+                user_id=uid,
+                session_id=request.session_id,
+                new_message=content,
+            )
+        ) as events:
+            async for event in events:
+                if getattr(event, "partial", False):
+                    continue
+                if not event.content or not event.content.parts:
+                    continue
+                if event.content.role == "user":
+                    continue
+                text = "".join(p.text for p in event.content.parts if p.text)
+                if text.strip():
+                    response_parts.append(text.strip())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return GenerateResponse(
+        response="\n\n".join(response_parts),
+        session_id=request.session_id,
+    )
 
 
 @app.get("/health")
