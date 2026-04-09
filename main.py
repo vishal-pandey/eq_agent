@@ -442,3 +442,22 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/debug/config")
+async def debug_config() -> dict:
+    """Debug endpoint — shows what config each agent is currently using."""
+    from eq_helper.agent import _config_cache as agent_cache
+    from eq_helper.nudge_agent import _nudge_cache as nudge_cache
+    return {
+        "agent": {
+            "instruction_len": len(agent_cache.get("instruction", "")),
+            "description_preview": (agent_cache.get("description", ""))[:100],
+            "cache_age_seconds": round((__import__("time").time() - agent_cache.get("ts", 0)), 1),
+        },
+        "nudge_agent": {
+            "instruction_len": len(nudge_cache.get("instruction", "")),
+            "description_preview": (nudge_cache.get("description", ""))[:100],
+            "cache_age_seconds": round((__import__("time").time() - nudge_cache.get("ts", 0)), 1),
+        },
+    }

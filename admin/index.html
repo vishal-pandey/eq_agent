@@ -157,13 +157,34 @@ textarea.fallback-editor:focus{border-color:var(--g)}
 import {Crepe} from 'https://esm.sh/@milkdown/crepe@7.8.0?bundle';
 
 let descCrepe=null,instrCrepe=null;
+let editorMode='visual'; // 'visual' or 'markdown'
+let _lastDescVal='',_lastInstrVal='';
 
-window._mkInit=async function(descVal,instrVal){
+function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+
+function _getCurrentDesc(){
+  if(editorMode==='markdown'){
+    const fb=document.getElementById('descFallback');
+    return fb?fb.value:'';
+  }
+  if(descCrepe)try{return descCrepe.getMarkdown()}catch(e){}
+  return _lastDescVal;
+}
+
+function _getCurrentInstr(){
+  if(editorMode==='markdown'){
+    const fb=document.getElementById('instrFallback');
+    return fb?fb.value:'';
+  }
+  if(instrCrepe)try{return instrCrepe.getMarkdown()}catch(e){}
+  return _lastInstrVal;
+}
+
+async function _initVisual(descVal,instrVal){
   const dEl=document.getElementById('descEditor');
   const iEl=document.getElementById('instrEditor');
-  if(!dEl||!iEl)return;
+  if(!dEl||!iEl)return false;
 
-  // Destroy previous instances
   if(descCrepe){try{descCrepe.destroy()}catch(e){}}
   if(instrCrepe){try{instrCrepe.destroy()}catch(e){}}
   descCrepe=null;instrCrepe=null;
@@ -174,28 +195,60 @@ window._mkInit=async function(descVal,instrVal){
     await descCrepe.create();
     instrCrepe=new Crepe({root:iEl,defaultValue:instrVal||''});
     await instrCrepe.create();
+    return true;
   }catch(e){
-    console.error('Milkdown Crepe init failed, using textarea fallback',e);
+    console.error('Milkdown Crepe init failed',e);
     descCrepe=null;instrCrepe=null;
-    dEl.parentElement.innerHTML='<textarea class="fallback-editor" id="descFallback">'+escHtml(descVal||'')+'</textarea>';
-    iEl.parentElement.innerHTML='<textarea class="fallback-editor" id="instrFallback">'+escHtml(instrVal||'')+'</textarea>';
+    return false;
+  }
+}
+
+function _initMarkdown(descVal,instrVal){
+  const dWrap=document.getElementById('descEditorWrap');
+  const iWrap=document.getElementById('instrEditorWrap');
+  if(!dWrap||!iWrap)return;
+
+  if(descCrepe){try{descCrepe.destroy()}catch(e){}}
+  if(instrCrepe){try{instrCrepe.destroy()}catch(e){}}
+  descCrepe=null;instrCrepe=null;
+
+  dWrap.innerHTML='<textarea class="fallback-editor" id="descFallback">'+escHtml(descVal||'')+'</textarea>';
+  iWrap.innerHTML='<textarea class="fallback-editor" id="instrFallback">'+escHtml(instrVal||'')+'</textarea>';
+}
+
+window._mkInit=async function(descVal,instrVal){
+  _lastDescVal=descVal||'';_lastInstrVal=instrVal||'';
+  if(editorMode==='markdown'){
+    _initMarkdown(descVal,instrVal);
+  }else{
+    const ok=await _initVisual(descVal,instrVal);
+    if(!ok){editorMode='markdown';_initMarkdown(descVal,instrVal);_updateToggleUI()}
   }
 };
 
-window._mkGetDesc=()=>{
-  const fb=document.getElementById('descFallback');
-  if(fb)return fb.value;
-  if(descCrepe)try{return descCrepe.getMarkdown()}catch(e){}
-  return'';
-};
-window._mkGetInstr=()=>{
-  const fb=document.getElementById('instrFallback');
-  if(fb)return fb.value;
-  if(instrCrepe)try{return instrCrepe.getMarkdown()}catch(e){}
-  return'';
+window._mkGetDesc=()=>_getCurrentDesc();
+window._mkGetInstr=()=>_getCurrentInstr();
+
+window._mkToggleMode=async function(){
+  const desc=_getCurrentDesc();
+  const instr=_getCurrentInstr();
+  _lastDescVal=desc;_lastInstrVal=instr;
+
+  if(editorMode==='visual'){
+    editorMode='markdown';
+    _initMarkdown(desc,instr);
+  }else{
+    editorMode='visual';
+    const ok=await _initVisual(desc,instr);
+    if(!ok){editorMode='markdown';_initMarkdown(desc,instr)}
+  }
+  _updateToggleUI();
 };
 
-function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function _updateToggleUI(){
+  const btn=document.getElementById('editorToggleBtn');
+  if(btn)btn.textContent=editorMode==='visual'?'Switch to Markdown':'Switch to Visual';
+}
 </script>
 <script>
 // ============ State ============
@@ -333,19 +386,21 @@ async function renderSettingsPanel(prefill){
     <div class="settings-panel">
       <div class="settings-header">
         <h3>${isView?'Viewing v'+prefill.version:'Edit Agent Config'} ${ver?' (current: v'+ver+')':' (no config saved yet)'}</h3>
-        ${isView?'<button class="tab-btn" onclick="renderSettingsPanel()">← Back to Editor</button>':''}
+        <div style="display:flex;gap:8px;align-items:center">
+          ${isView?'<button class="tab-btn" onclick="renderSettingsPanel()">← Back to Editor</button>':''}
+          <button class="tab-btn" id="editorToggleBtn" onclick="window._mkToggleMode&&window._mkToggleMode()">Switch to Markdown</button>
+        </div>
       </div>
       <div class="settings-body">
         <div class="field-label">Description <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
-        <div class="editor-wrap"><div id="descEditor"></div></div>
+        <div class="editor-wrap" id="descEditorWrap"><div id="descEditor"></div></div>
         <div class="field-label" style="margin-top:20px">Instruction <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
-        <div class="editor-wrap" style="min-height:300px"><div id="instrEditor"></div></div>
+        <div class="editor-wrap" style="min-height:300px" id="instrEditorWrap"><div id="instrEditor"></div></div>
         ${isView?'':'<div style="margin-top:20px"><button class="save-btn" id="saveBtn" onclick="saveConfig()">Save New Version</button><span class="save-msg" id="saveMsg"></span></div>'}
         <div style="height:40px"></div>
       </div>
     </div>`;
 
-  // Init Milkdown editors
   if(window._mkInit){await window._mkInit(desc,instr)}
 }
 
@@ -473,13 +528,16 @@ async function renderNudgePanel(prefill){
     <div class="settings-panel">
       <div class="settings-header">
         <h3>${isView?'Viewing v'+prefill.version:'Edit Nudge Agent Config'} ${ver?' (current: v'+ver+')':' (no config saved yet)'}</h3>
-        ${isView?'<button class="tab-btn" onclick="renderNudgePanel()">← Back to Editor</button>':''}
+        <div style="display:flex;gap:8px;align-items:center">
+          ${isView?'<button class="tab-btn" onclick="renderNudgePanel()">← Back to Editor</button>':''}
+          <button class="tab-btn" id="editorToggleBtn" onclick="window._mkToggleMode&&window._mkToggleMode()">Switch to Markdown</button>
+        </div>
       </div>
       <div class="settings-body">
         <div class="field-label">Description <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
-        <div class="editor-wrap"><div id="descEditor"></div></div>
+        <div class="editor-wrap" id="descEditorWrap"><div id="descEditor"></div></div>
         <div class="field-label" style="margin-top:20px">Instruction <span style="font-size:.72em;color:var(--t2)">Markdown supported</span></div>
-        <div class="editor-wrap" style="min-height:300px"><div id="instrEditor"></div></div>
+        <div class="editor-wrap" style="min-height:300px" id="instrEditorWrap"><div id="instrEditor"></div></div>
         ${isView?'':'<div style="margin-top:20px"><button class="save-btn" id="nudgeSaveBtn" onclick="saveNudgeConfig()">Save New Version</button><span class="save-msg" id="nudgeSaveMsg"></span></div>'}
         <div style="height:40px"></div>
       </div>
