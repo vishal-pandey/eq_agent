@@ -449,15 +449,19 @@ async def debug_config() -> dict:
     """Debug endpoint — shows what config each agent is currently using."""
     from eq_helper.agent import _config_cache as agent_cache
     from eq_helper.nudge_agent import _nudge_cache as nudge_cache
+    import time as _t
     return {
         "agent": {
             "instruction_len": len(agent_cache.get("instruction", "")),
             "description_preview": (agent_cache.get("description", ""))[:100],
-            "cache_age_seconds": round((__import__("time").time() - agent_cache.get("ts", 0)), 1),
+            "cache_age_seconds": round((_t.time() - agent_cache.get("ts", 0)), 1) if agent_cache.get("ts", 0) > 0 else "never_refreshed",
+            "last_error": agent_cache.get("last_error"),
         },
         "nudge_agent": {
             "instruction_len": len(nudge_cache.get("instruction", "")),
             "description_preview": (nudge_cache.get("description", ""))[:100],
-            "cache_age_seconds": round((__import__("time").time() - nudge_cache.get("ts", 0)), 1),
+            "cache_age_seconds": round((_t.time() - nudge_cache.get("ts", 0)), 1) if nudge_cache.get("ts", 0) > 0 else "never_refreshed",
+            "last_error": nudge_cache.get("last_error"),
         },
+        "database_url_set": bool(os.environ.get("DATABASE_URL")),
     }

@@ -297,7 +297,7 @@ if asked.
 import time as _time
 import asyncpg as _apg_mod
 
-_config_cache: dict = {"instruction": DEFAULT_INSTRUCTION, "description": DEFAULT_DESCRIPTION, "ts": 0}
+_config_cache: dict = {"instruction": DEFAULT_INSTRUCTION, "description": DEFAULT_DESCRIPTION, "ts": 0, "last_error": None}
 _CACHE_TTL = 60  # seconds
 
 
@@ -305,8 +305,8 @@ async def _refresh_config_cache():
     """Fetch active config from DB and update cache."""
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
-        # No DB configured — stamp the cache so we don't retry every request
         _config_cache["ts"] = _time.time()
+        _config_cache["last_error"] = "DATABASE_URL not set"
         return
     if "+asyncpg" in db_url:
         db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
@@ -321,12 +321,13 @@ async def _refresh_config_cache():
             _config_cache["instruction"] = row["instruction"]
             _config_cache["description"] = row["description"]
             _config_cache["ts"] = _time.time()
+            _config_cache["last_error"] = None
             print(f"✅ Refreshed agent config from DB (len={len(row['instruction'])})")
         else:
-            # No active row — don't update ts so we retry sooner
+            _config_cache["last_error"] = "No active agent_config row found"
             print("⚠️  No active agent_config row found in DB")
     except Exception as exc:
-        # Don't update ts on failure — retry on next request
+        _config_cache["last_error"] = str(exc)
         print(f"⚠️  Failed to refresh agent config: {exc}")
 
 

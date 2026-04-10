@@ -34,7 +34,7 @@ class FollowupCycleWorkflow:
       - 11:00 AM → category "protip"  (pro tip; n8n checks 2.5hr activity)
       - 2:00 PM  → category "protip"
       - 5:00 PM  → category "protip"
-      - 8:00 PM  → category "checkin" (check task completion; always fires)
+      - 6:00 PM  → category "checkin" (check task completion; always fires)
 
     Runs indefinitely until cancelled.
     """
@@ -45,44 +45,46 @@ class FollowupCycleWorkflow:
         (11, "protip",  True),
         (14, "protip",  True),
         (17, "protip",  True),
-        (20, "checkin", False),
+        (18, "checkin", False),
     ]
-
-    def _next_slot(self) -> tuple[int, str, bool] | None:
-        """Find the next slot that hasn't passed yet today (IST).
-
-        Returns None if all slots are done for today.
-        """
-        now_ist = _ist_now()
-        current_minutes = now_ist.hour * 60 + now_ist.minute
-        for hour, category, check_activity in self._SLOTS:
-            # Use minute-level comparison: slot is still upcoming if its
-            # start minute is strictly in the future
-            if hour * 60 > current_minutes:
-                return (hour, category, check_activity)
-        return None
 
     @workflow.run
     async def run(self, inp: FollowupCycleInput) -> None:
         while True:
-            slot = self._next_slot()
+            now_ist = _ist_now()
+            current_minutes = now_ist.hour * 60 + now_ist.minute
 
-            if slot is None:
+            # Find the next slot that hasn't passed yet today
+            next_slot = None
+            for hour, category, check_activity in self._SLOTS:
+                if hour * 60 > current_minutes:
+                    next_slot = (hour, category, check_activity)
+                    break
+
+            if next_slot is None:
                 # All slots done today — sleep until 8AM tomorrow
                 delay = _seconds_until_ist_time(8)
                 workflow.logger.info(
                     f"[{inp.session_id}] All slots done, sleeping {delay:.0f}s until 8AM tomorrow"
                 )
                 await asyncio.sleep(delay)
-                continue
+                # After waking up at 8AM, immediately fire the 8AM slot
+                # instead of re-evaluating (avoids the exact-hour edge case)
+                next_slot = self._SLOTS[0]
 
-            hour, category, check_activity = slot
+            hour, category, check_activity = next_slot
+
+            # If we just woke up from overnight sleep, delay will be ~0
             delay = _seconds_until_ist_time(hour)
+            # If delay is > 23 hours, we're already at/past this hour — fire now
+            if delay > 23 * 3600:
+                delay = 0
 
-            workflow.logger.info(
-                f"[{inp.session_id}] Next: '{category}' at {hour}:00 IST in {delay:.0f}s"
-            )
-            await asyncio.sleep(delay)
+            if delay > 0:
+                workflow.logger.info(
+                    f"[{inp.session_id}] Next: '{category}' at {hour}:00 IST in {delay:.0f}s"
+                )
+                await asyncio.sleep(delay)
 
             payload = json.dumps({
                 "session_id": inp.session_id,

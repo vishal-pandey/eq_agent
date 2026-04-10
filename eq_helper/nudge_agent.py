@@ -72,6 +72,7 @@ _nudge_cache: dict = {
     "instruction": DEFAULT_INSTRUCTION,
     "description": DEFAULT_DESCRIPTION,
     "ts": 0,
+    "last_error": None,
 }
 _CACHE_TTL = 60
 
@@ -81,6 +82,7 @@ async def _refresh_nudge_config():
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
         _nudge_cache["ts"] = _time.time()
+        _nudge_cache["last_error"] = "DATABASE_URL not set"
         return
     if "+asyncpg" in db_url:
         db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
@@ -95,10 +97,13 @@ async def _refresh_nudge_config():
             _nudge_cache["instruction"] = row["instruction"]
             _nudge_cache["description"] = row["description"]
             _nudge_cache["ts"] = _time.time()
+            _nudge_cache["last_error"] = None
             print(f"✅ Refreshed nudge agent config from DB (len={len(row['instruction'])})")
         else:
+            _nudge_cache["last_error"] = "No active nudge_agent_config row found"
             print("⚠️  No active nudge_agent_config row found in DB")
     except Exception as exc:
+        _nudge_cache["last_error"] = str(exc)
         print(f"⚠️  Failed to refresh nudge agent config: {exc}")
 
 
