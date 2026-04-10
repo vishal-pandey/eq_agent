@@ -364,6 +364,13 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     uid = request.user_id or "default_user"
     nudge = _GENERATE_PROMPTS[request.category]
 
+    # Log the resolved system instruction for debugging
+    from eq_helper.nudge_agent import _dynamic_nudge_instruction
+    resolved_instruction = await _dynamic_nudge_instruction(None)
+    print(f"📋 /generate [{request.category}] for session={request.session_id}")
+    print(f"📋 Nudge agent instruction ({len(resolved_instruction)} chars):\n{resolved_instruction}")
+    print(f"📋 User prompt: {nudge}")
+
     # Load the real session to get conversation history + state
     real_session = await session_service.get_session(
         app_name=APP_NAME, user_id=uid, session_id=request.session_id
